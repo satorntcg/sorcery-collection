@@ -1,0 +1,397 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SatornTCG Sorcery Collection</title>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 16px; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border-bottom: 1px solid #ddd; padding: 8px; vertical-align: middle; }
+    th { text-align: left; background: #fff; position: sticky; top: 0; }
+    img { height: 80px; border-radius: 8px; }
+    .price { white-space: nowrap; }
+    .muted { color: #666; font-size: 12px; }
+    .row { display: flex; gap: 12px; align-items: center; }
+    input { padding: 8px; min-width: 260px; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    #image-preview { padding: 4px; }
+
+   /* Hover preview container */
+   #image-preview {
+     position: fixed;
+     pointer-events: none;
+     z-index: 9999;
+     display: none;
+     border-radius: 10px;
+     box-shadow: 0 12px 30px rgba(0,0,0,0.35);
+     background: #111;
+     padding: 6px;
+   }
+
+   #image-preview img {
+     height: 420px;   /* 👈 adjust size here */
+     width: auto;
+     border-radius: 8px;
+   }
+
+  </style>
+</head>
+
+<div id="image-preview">
+  <img id="preview-img" src="" alt="">
+</div>
+
+<body>
+  <h1>SatornTCG Sorcery Collection</h1>
+  <p class="muted">If you are interested in purchasing any of the cards please reach out: <a href="#" id="email-link">email us</a></p>
+  <div class="row">
+    <button id="refresh">Refresh</button>
+    <input id="filter" placeholder="Filter by card name..." />
+    <span id="status" class="muted"></span>
+  </div>
+
+  <div class="row" style="margin-top: 10px;">
+    <button id="prevPage">Prev</button>
+    <span id="pageInfo" class="muted"></span>
+    <button id="nextPage">Next</button>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th></th>
+        <th data-sort="card">Card <span id="arrow-card"></span></th>
+        <th data-sort="marketPrice">Market Price <span id="arrow-marketPrice"></span></th>
+        <th data-sort="count">Count <span id="arrow-count"></span></th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+
+<div class="row" style="margin-top:16px; justify-content:center;">
+  <button id="prevPageBottom">Prev</button>
+  <span id="pageInfoBottom" class="muted" style="margin:0 12px;"></span>
+  <button id="nextPageBottom">Next</button>
+</div>
+
+<script>
+  // ✅ Replace this with your published CSV URL:
+  const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vR8fnXrOXvuj-5uY5Jybr4jjZ0e-rSWlFmYUTg-PYbVQcPqXYqYC_AuYdOe00O1PECsNka-MFcm6ddb/pub?gid=1629671938&single=true&output=csv";
+
+  const statusEl = document.getElementById("status");
+  const rowsEl = document.getElementById("rows");
+  const filterEl = document.getElementById("filter");
+  document.getElementById("refresh").addEventListener("click", load);
+  filterEl.addEventListener("input", () => {
+    currentPage = 1;
+    render(window.__cards || []);
+  });
+
+  //Sorting Logic
+  let sortKey = "marketPrice";
+  let sortDir = "desc"; // "asc" or "desc"
+
+  function compare(a, b, key) {
+    const av = a[key];
+    const bv = b[key];
+
+    // Strings
+    if (typeof av === "string" || typeof bv === "string") {
+      const as = (av ?? "").toString().toLowerCase();
+      const bs = (bv ?? "").toString().toLowerCase();
+      if (as < bs) return -1;
+      if (as > bs) return 1;
+      return 0;
+    }
+
+    // Numbers (nulls last)
+    const an = Number.isFinite(av) ? av : null;
+    const bn = Number.isFinite(bv) ? bv : null;
+    if (an === null && bn === null) return 0;
+    if (an === null) return 1;
+    if (bn === null) return -1;
+    return an - bn;
+  }
+
+  function applySort(cards) {
+    const dir = sortDir === "asc" ? 1 : -1;
+    return [...cards].sort((a, b) => dir * compare(a, b, sortKey));
+  }
+
+  function setSort(key) {
+    
+    if (sortKey === key) {
+      sortDir = sortDir === "asc" ? "desc" : "asc";
+    } else {
+      sortKey = key;
+      // default direction by column
+      sortDir = (key === "card") ? "asc" : "desc";
+    }
+    updateSortArrows();
+    currentPage = 1;
+    render(window.__cards || []);
+  }
+
+  function updateSortArrows() {
+    const keys = ["card", "marketPrice", "count"];
+    for (const k of keys) {
+      const el = document.getElementById(`arrow-${k}`);
+      if (!el) continue;
+      el.textContent = (k === sortKey) ? (sortDir === "asc" ? " ▲" : " ▼") : "";
+    }
+  }
+
+  //Pagination Logic
+  const pageSize = 10;
+  let currentPage = 1;
+
+  function totalPages(totalItems) {
+    return Math.max(1, Math.ceil(totalItems / pageSize));
+  }
+
+  function clampPage(page, totalItems) {
+    const tp = totalPages(totalItems);
+    return Math.min(tp, Math.max(1, page));
+  }
+
+  function updatePager(totalItems) {
+    const tp = totalPages(totalItems);
+    currentPage = clampPage(currentPage, totalItems);
+
+    const text = `Page ${currentPage} of ${tp} (${totalItems} cards)`;
+
+    // Top pager
+    document.getElementById("pageInfo").textContent = text;
+    document.getElementById("prevPage").disabled = currentPage <= 1;
+    document.getElementById("nextPage").disabled = currentPage >= tp;
+
+    // Bottom pager
+    document.getElementById("pageInfoBottom").textContent = text;
+    document.getElementById("prevPageBottom").disabled = currentPage <= 1;
+    document.getElementById("nextPageBottom").disabled = currentPage >= tp;
+  }
+
+  function money(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return "—";
+    return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
+  }
+
+  // Minimal CSV parser (supports commas inside quotes)
+  function parseCSV(text) {
+    const rows = [];
+    let row = [];
+    let cur = "";
+    let inQuotes = false;
+
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      const next = text[i + 1];
+
+      if (c === '"' && inQuotes && next === '"') { cur += '"'; i++; continue; }
+      if (c === '"') { inQuotes = !inQuotes; continue; }
+
+      if (c === "," && !inQuotes) { row.push(cur); cur = ""; continue; }
+      if (c === "\n" && !inQuotes) { row.push(cur); rows.push(row); row = []; cur = ""; continue; }
+
+      cur += c;
+    }
+    if (cur.length || row.length) { row.push(cur); rows.push(row); }
+
+    // trim whitespace + drop empty trailing rows
+    return rows.map(r => r.map(x => (x ?? "").trim())).filter(r => r.some(v => v));
+  }
+
+  function normalizeHeader(h) {
+    return (h || "").toLowerCase().replace(/\s+/g, "");
+  }
+
+  function toNumberOrNull(v) {
+    const n = Number(String(v).replace(/[$,]/g, ""));
+    return Number.isFinite(n) ? n : null;
+  }
+
+function render(cards) {
+  const q = filterEl.value.trim().toLowerCase();
+
+  const filteredBase = q
+    ? cards.filter(c => (c.card || "").toLowerCase().includes(q))
+    : cards;
+
+  const filtered = applySort(filteredBase);
+
+  // ✅ Pagination
+  updatePager(filtered.length);
+  const start = (currentPage - 1) * pageSize;
+  const pageRows = filtered.slice(start, start + pageSize);
+
+  rowsEl.innerHTML = "";
+
+  for (const c of pageRows) {
+    const tr = document.createElement("tr");
+
+    const tdCard = document.createElement("td");
+    tdCard.textContent = c.card || "—";
+
+    const tdPrice = document.createElement("td");
+    tdPrice.className = "price";
+    tdPrice.textContent = money(c.marketPrice);
+
+    const tdCount = document.createElement("td");
+    tdCount.textContent = (c.count ?? "—");
+
+    const tdImg = document.createElement("td");
+    if (c.imageFile) {
+      const img = document.createElement("img");
+
+      // Allow either "foo" or "foo.jpg" in the sheet
+      const filename = c.imageFile.toLowerCase().endsWith(".jpg")
+        ? c.imageFile
+        : `${c.imageFile}.jpg`;
+
+      img.src = `images/${encodeURIComponent(filename)}`;
+      img.alt = c.card || filename;
+      img.loading = "lazy";
+      img.style.cursor = "zoom-in";
+
+      // Hover preview logic
+      img.addEventListener("mouseenter", () => {
+        const preview = document.getElementById("image-preview");
+        const previewImg = document.getElementById("preview-img");
+        previewImg.src = img.src;
+        preview.style.display = "block";
+      });
+
+      img.addEventListener("mousemove", (e) => {
+        const preview = document.getElementById("image-preview");
+        const offset = 20;
+
+        const previewHeight = preview.offsetHeight || 320;
+        const viewportHeight = window.innerHeight;
+
+        let top = e.clientY + offset;
+
+        // 🔁 If preview would go off bottom, flip it above cursor
+        if (top + previewHeight > viewportHeight) {
+          top = e.clientY - previewHeight - offset;
+        }
+
+        preview.style.left = `${e.clientX + offset}px`;
+        preview.style.top = `${top}px`;
+      });
+
+      img.addEventListener("mouseleave", () => {
+        const preview = document.getElementById("image-preview");
+        preview.style.display = "none";
+      });
+
+      img.onerror = () => {
+        tdImg.textContent = `Missing: images/${filename}`;
+      };
+
+      tdImg.appendChild(img);
+    } else {
+      tdImg.textContent = "—";
+    }
+
+    // Order to match your headers
+    tr.append(tdImg, tdCard, tdPrice, tdCount);
+    rowsEl.appendChild(tr);
+  }
+
+  statusEl.textContent = `Showing ${pageRows.length} on this page (of ${filtered.length} matched)`;
+}
+
+  async function load() {
+    statusEl.textContent = "Loading…";
+    rowsEl.innerHTML = "";
+
+    const res = await fetch(SHEET_CSV_URL, { cache: "no-store" });
+    if (!res.ok) {
+      statusEl.textContent = `Error loading sheet: ${res.status}`;
+      return;
+    }
+
+    const csv = await res.text();
+    const data = parseCSV(csv);
+    if (!data.length) {
+      statusEl.textContent = "No rows found.";
+      return;
+    }
+
+    // Map headers → indices
+    const header = data[0].map(normalizeHeader);
+    const idx = (name) => header.indexOf(normalizeHeader(name));
+
+    const iCard = idx("Card");
+    const iPrice = idx("MarketPrice");
+    const iCount = idx("Count");
+    const iImage = idx("Image");
+
+    // Validate required columns
+    const missing = [];
+    if (iCard === -1) missing.push("Card");
+    if (iPrice === -1) missing.push("MarketPrice");
+    if (iCount === -1) missing.push("Count");
+    if (iImage === -1) missing.push("Image");
+
+    if (missing.length) {
+      statusEl.textContent = `Missing columns in sheet: ${missing.join(", ")}`;
+      return;
+    }
+
+    const cards = data.slice(1).map(r => ({
+      card: r[iCard] || "",
+      marketPrice: toNumberOrNull(r[iPrice]),
+      count: toNumberOrNull(r[iCount]),
+      imageFile: (r[iImage] || "").replace(/^images\//i, "") // allow either "foo.jpg" or "images/foo.jpg"
+    }))
+    .filter(c => c.card); // ignore empty rows
+
+    window.__cards = cards;
+    render(cards);
+  }
+
+  document.querySelectorAll("th[data-sort]").forEach(th => {
+    th.style.cursor = "pointer";
+    th.addEventListener("click", () => setSort(th.dataset.sort));
+  });
+
+  updateSortArrows(); 
+
+  //Previous and Next Buttons
+  document.getElementById("prevPage").addEventListener("click", () => {
+    currentPage = Math.max(1, currentPage - 1);
+    render(window.__cards || []);
+  });
+
+  document.getElementById("nextPage").addEventListener("click", () => {
+    currentPage = currentPage + 1; // clamp happens in updatePager
+    render(window.__cards || []);
+  });
+
+  document.getElementById("prevPageBottom").addEventListener("click", () => {
+    currentPage = Math.max(1, currentPage - 1);
+    render(window.__cards || []);
+  });
+
+  document.getElementById("nextPageBottom").addEventListener("click", () => {
+    currentPage = currentPage + 1;
+    render(window.__cards || []);
+  });
+  
+  // Simple email obfuscation to reduce spam
+  const user = "satorntcg";
+  const domain = "gmail.com";
+  const email = `${user}@${domain}`;
+
+  const link = document.getElementById("email-link");
+  link.textContent = email;
+  link.href = `mailto:${email}`;
+
+  load();
+</script>
+
+</body>
+</html>
