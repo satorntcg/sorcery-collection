@@ -1,1 +1,9 @@
+
+Google Sheets - Collection
 https://docs.google.com/spreadsheets/d/e/2PACX-1vR8fnXrOXvuj-5uY5Jybr4jjZ0e-rSWlFmYUTg-PYbVQcPqXYqYC_AuYdOe00O1PECsNka-MFcm6ddb/pub?gid=1629671938&single=true&output=csv
+
+Local Server
+npx serve
+
+External Site
+https://satorntcg.github.io/sorcery-collection/
