@@ -1,0 +1,2 @@
+-- Optional full schema snapshot for review context.
+-- Prefer Supabase CLI migrations for authoritative changes.

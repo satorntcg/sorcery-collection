@@ -1,0 +1,3 @@
+-- App-facing view definitions can be exported here.
+-- Example:
+-- create or replace view public.v_latest_prices as ...
