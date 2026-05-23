@@ -12,6 +12,7 @@ import Settings from './pages/Settings'
 import Import from './pages/Import'
 import Login from './pages/Login'
 import YouTube from './pages/YouTube'
+import ListingSuggestions from './pages/ListingSuggestions'
 
 export default function App() {
   const [session, setSession]       = useState(undefined)
@@ -62,6 +63,7 @@ export default function App() {
           <Route path="/youtube"   element={<YouTube />} />
           <Route path="/import"    element={<Import />} />
           <Route path="/settings"  element={<Settings />} />
+          <Route path="/suggestions" element={<ListingSuggestions />} />
           <Route path="*"          element={<Navigate to="/" />} />
         </Routes>
       </main>

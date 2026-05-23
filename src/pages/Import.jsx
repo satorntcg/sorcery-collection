@@ -1,14 +1,15 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 
-function getSheetUrls(url, boxesGid, packsGid) {
+function getSheetUrls(url, boxesGid, packsGid, listingsGid) {
   const pubIdMatch = url.match(/\/d\/e\/([^/]+)/)
   if (!pubIdMatch) return null
   const pubId = pubIdMatch[1]
   return {
-    cards: `https://docs.google.com/spreadsheets/d/e/${pubId}/pub?gid=0&single=true&output=csv`,
-    boxes: `https://docs.google.com/spreadsheets/d/e/${pubId}/pub?gid=${boxesGid}&single=true&output=csv`,
-    packs: `https://docs.google.com/spreadsheets/d/e/${pubId}/pub?gid=${packsGid}&single=true&output=csv`,
+    cards:    `https://docs.google.com/spreadsheets/d/e/${pubId}/pub?gid=0&single=true&output=csv`,
+    boxes:    `https://docs.google.com/spreadsheets/d/e/${pubId}/pub?gid=${boxesGid}&single=true&output=csv`,
+    packs:    `https://docs.google.com/spreadsheets/d/e/${pubId}/pub?gid=${packsGid}&single=true&output=csv`,
+    listings: listingsGid ? `https://docs.google.com/spreadsheets/d/e/${pubId}/pub?gid=${listingsGid}&single=true&output=csv` : null,
   }
 }
 
@@ -39,7 +40,6 @@ const BOX_TYPE_MAP = {
   'bundle':'bundle','other':'other',
 }
 
-// Simplified — condition always near_mint, quantity always 1 for pack pulls
 function normalizeCard(row) {
   return {
     name:         row.name?.trim(),
@@ -86,25 +86,13 @@ async function runImport(cardRows, boxRows, packRows, onLog) {
   const boxRefMap = {}
   const packRefMap = {}
 
-  // ── Boxes ──
   for (const raw of boxRows) {
     const box = normalizeBox(raw)
     const ref = box._ref; delete box._ref
     if (!box.purchase_price) { onLog('warn', `Skipping box with no price: ${raw.set_name}`); continue }
-
-    const { data: existing } = await supabase
-      .from('boxes').select('id')
-      .eq('set_name', box.set_name)
-      .eq('purchase_price', box.purchase_price)
-      .eq('pack_count', box.pack_count)
-      .maybeSingle()
-
-    if (existing) {
-      if (ref) boxRefMap[ref] = existing.id
-      onLog('info', `Skipped (exists): ${box.set_name} box`)
-      skipped++; continue
-    }
-
+    const { data: existing } = await supabase.from('boxes').select('id')
+      .eq('set_name', box.set_name).eq('purchase_price', box.purchase_price).eq('pack_count', box.pack_count).maybeSingle()
+    if (existing) { if (ref) boxRefMap[ref] = existing.id; onLog('info', `Skipped (exists): ${box.set_name} box`); skipped++; continue }
     const { data, error } = await supabase.from('boxes').insert(box).select('id').single()
     if (error) { onLog('error', `Box (${box.set_name}): ${error.message}`); errorCount++; continue }
     if (ref) boxRefMap[ref] = data.id
@@ -112,63 +100,43 @@ async function runImport(cardRows, boxRows, packRows, onLog) {
     boxCount++
   }
 
-  // ── Packs ──
   for (const raw of packRows) {
     const pack = normalizePack(raw)
     const ref = pack._ref; const boxRef = pack._box_ref
     delete pack._ref; delete pack._box_ref
-
     const boxId = boxRefMap[boxRef]
     if (!boxId) { onLog('warn', `Pack ${pack.pack_number}: no matching box_ref "${boxRef}"`); continue }
-
-    const { data: existing } = await supabase
-      .from('packs').select('id')
-      .eq('box_id', boxId)
-      .eq('pack_number', pack.pack_number)
-      .maybeSingle()
-
-    if (existing) {
-      if (ref) packRefMap[ref] = existing.id
-      onLog('info', `Skipped (exists): Pack #${pack.pack_number}`)
-      skipped++; continue
-    }
-
-    const { data, error } = await supabase.from('packs')
-      .insert({ ...pack, box_id: boxId }).select('id').single()
+    const { data: existing } = await supabase.from('packs').select('id')
+      .eq('box_id', boxId).eq('pack_number', pack.pack_number).maybeSingle()
+    if (existing) { if (ref) packRefMap[ref] = existing.id; onLog('info', `Skipped (exists): Pack #${pack.pack_number}`); skipped++; continue }
+    const { data, error } = await supabase.from('packs').insert({ ...pack, box_id: boxId }).select('id').single()
     if (error) { onLog('error', `Pack ${pack.pack_number}: ${error.message}`); errorCount++; continue }
     if (ref) packRefMap[ref] = data.id
     onLog('success', `Pack #${pack.pack_number} → box ${boxRef}`)
     packCount++
   }
 
-  // ── Cards ──
   for (const raw of cardRows) {
     const card = normalizeCard(raw)
     const packRef = card._pack_ref
     const quantity = card._quantity ?? 1
     delete card._pack_ref; delete card._quantity
-
     if (!card.name) { onLog('warn', 'Skipping row with no name'); continue }
-
-    const { data: existing } = await supabase
-      .from('cards').select('id, quantity_owned')
-      .ilike('name', card.name)
-      .eq('set_name', card.set_name)
-      .eq('condition', card.condition)
-      .eq('foil', card.foil)
-      .maybeSingle()
-
+    const packId = packRef ? packRefMap[packRef] : null
+    const { data: existing } = await supabase.from('cards').select('id, quantity_owned')
+      .ilike('name', card.name).eq('set_name', card.set_name).eq('condition', card.condition).eq('foil', card.foil).maybeSingle()
+    if (existing && packId) {
+      const { data: existingLink } = await supabase.from('pack_cards').select('id')
+        .eq('pack_id', packId).eq('card_id', existing.id).maybeSingle()
+      if (existingLink) { onLog('info', `Skipped (already imported): ${card.name} → ${packRef}`); skipped++; continue }
+    }
     let cardId
     if (existing) {
       cardId = existing.id
       const nextQuantity = Number(existing.quantity_owned ?? 0) + quantity
-      const { error } = await supabase
-        .from('cards')
-        .update({ quantity_owned: nextQuantity })
-        .eq('id', cardId)
+      const { error } = await supabase.from('cards').update({ quantity_owned: nextQuantity }).eq('id', cardId)
       if (error) { onLog('error', `Card quantity (${card.name}): ${error.message}`); errorCount++; continue }
-      onLog('info', `Updated quantity: ${card.name} (${nextQuantity} owned)`)
-      skipped++
+      onLog('info', `Updated quantity: ${card.name} (now ${nextQuantity} owned)`)
     } else {
       const { data, error } = await supabase.from('cards').insert({ ...card, quantity_owned: quantity }).select('id').single()
       if (error) { onLog('error', `Card (${card.name}): ${error.message}`); errorCount++; continue }
@@ -176,24 +144,8 @@ async function runImport(cardRows, boxRows, packRows, onLog) {
       onLog('success', `Added: ${card.name} (${card.rarity})`)
       cardCount++
     }
-
-    if (packRef && packRefMap[packRef]) {
-      const packId = packRefMap[packRef]
-      const { data: existingLink } = await supabase
-        .from('pack_cards')
-        .select('quantity')
-        .eq('pack_id', packId)
-        .eq('card_id', cardId)
-        .maybeSingle()
-      const { error } = existingLink
-        ? await supabase
-            .from('pack_cards')
-            .update({ quantity: Number(existingLink.quantity ?? 0) + quantity })
-            .eq('pack_id', packId)
-            .eq('card_id', cardId)
-        : await supabase
-            .from('pack_cards')
-            .insert({ pack_id: packId, card_id: cardId, quantity })
+    if (packId) {
+      const { error } = await supabase.from('pack_cards').insert({ pack_id: packId, card_id: cardId, quantity })
       if (error) onLog('warn', `Link failed ${card.name} → ${packRef}: ${error.message}`)
     } else if (packRef) {
       onLog('warn', `No matching pack for ref "${packRef}" (card: ${card.name})`)
@@ -203,41 +155,186 @@ async function runImport(cardRows, boxRows, packRows, onLog) {
   return { cardCount, boxCount, packCount, skipped, errorCount }
 }
 
+async function runListingsImport(listingRows, onLog) {
+  let created = 0, skipped = 0, errorCount = 0
+
+  // Group rows by listing_ref
+  const groups = {}
+  for (const row of listingRows) {
+    const ref = row.listing_ref?.trim()
+    if (!ref) { onLog('warn', `Row missing listing_ref — skipping`); continue }
+    if (!groups[ref]) groups[ref] = []
+    groups[ref].push(row)
+  }
+
+  onLog('info', `Found ${Object.keys(groups).length} listings to process`)
+
+  for (const [ref, rows] of Object.entries(groups)) {
+    const first    = rows[0]
+    const price    = parseFloat(first.price)    || 0
+    const shipping = parseFloat(first.shipping) || 0
+    const condition = 'Near Mint'
+    const rawStatus = first.status?.trim().toLowerCase()
+    const status   = rawStatus === 'sold' ? 'sold' : 'active'
+    const soldDate = first.sold_date?.trim() || null
+    const ebayUrl  = first.ebay_url?.trim()  || null
+    const notes    = first.notes?.trim()     || null
+
+    if (!price) { onLog('warn', `Skipping ${ref} — no price`); skipped++; continue }
+
+    // Dedup check via import_ref tag in notes
+    const { data: existing } = await supabase
+      .from('ebay_listings').select('id')
+      .ilike('notes', `%import_ref:${ref}%`)
+      .maybeSingle()
+    if (existing) { onLog('info', `Skipped (exists): ${ref}`); skipped++; continue }
+
+    // Resolve card IDs
+    const cardIds = []
+    const cardBreakdown = []
+    for (const row of rows) {
+      const name    = row.card_name?.trim()
+      const setName = row.set_name?.trim() || null
+      if (!name) continue
+      const foilVal = row.foil?.trim().toLowerCase()
+      const isFoil = ['true','yes','1','foil'].includes(foilVal)
+      let query = supabase.from('cards').select('id, name').ilike('name', name).eq('foil', isFoil)
+      if (setName) query = query.ilike('set_name', setName)
+      const { data: match } = await query.maybeSingle()
+      if (match) { cardIds.push(match.id); cardBreakdown.push(match.name) }
+      else onLog('warn', `Card not found in inventory: "${name}" (ref: ${ref})`)
+    }
+
+    // Block import if no cards matched
+    if (cardIds.length === 0) {
+      onLog('error', `Skipping ${ref} — no cards matched in inventory (checked: ${rows.map(r => r.card_name?.trim()).filter(Boolean).join(', ')})`)
+      errorCount++; continue
+    }
+
+    // Cost basis from matched cards
+    let costBasis = null
+    if (cardIds.length) {
+      const { data: priceData } = await supabase
+        .from('v_latest_prices').select('card_id, cost_basis').in('card_id', cardIds)
+      if (priceData?.length) costBasis = priceData.reduce((s, p) => s + (p.cost_basis || 0), 0)
+    }
+
+    const title = cardBreakdown.length === 1
+      ? `${cardBreakdown[0]} — Sorcery TCG`
+      : cardBreakdown.length > 1
+        ? `Sorcery TCG Lot — ${cardBreakdown.join(', ')}`
+        : `Sorcery TCG Lot (${ref})`
+
+    const fullNotes = [
+      cardBreakdown.length > 1 ? `Cards: ${cardBreakdown.join(', ')}` : null,
+      notes,
+      `import_ref:${ref}`,
+    ].filter(Boolean).join('\n')
+
+    const ebayFee     = parseFloat((price * 0.129 + 0.30).toFixed(2))
+    const netProceeds = parseFloat((price - ebayFee - shipping).toFixed(2))
+    const trueProfit  = costBasis ? parseFloat((netProceeds - costBasis).toFixed(2)) : netProceeds
+    const soldPayload = status === 'sold' ? {
+      sold_price:    price,
+      sold_shipping: shipping,
+      sold_ebay_fee: ebayFee,
+      net_profit:    trueProfit,
+      sold_at:       soldDate ? new Date(soldDate).toISOString() : new Date().toISOString(),
+    } : {}
+
+    const { data: newListing, error } = await supabase.from('ebay_listings').insert({
+      card_id:       cardIds.length === 1 ? cardIds[0] : null,
+      title,
+      listed_price:  price,
+      shipping_cost: shipping,
+      condition,
+      notes:         fullNotes,
+      cost_basis:    costBasis ? parseFloat(costBasis.toFixed(4)) : null,
+      status,
+      ebay_url:      ebayUrl || null,
+      ...soldPayload,
+    }).select('id').single()
+
+    if (error) { onLog('error', `Failed ${ref}: ${error.message}`); errorCount++; continue }
+
+    // Insert into ebay_listing_cards junction table
+    if (newListing && cardIds.length > 0) {
+      const perCardPrice = parseFloat((price / cardIds.length).toFixed(2))
+      const lcRows = cardIds.map(cardId => ({ listing_id: newListing.id, card_id: cardId, price: perCardPrice }))
+      const { error: lcErr } = await supabase.from('ebay_listing_cards').insert(lcRows)
+      if (lcErr) onLog('warn', `Card links failed for ${ref}: ${lcErr.message}`)
+      else onLog('info', `Linked ${lcRows.length} card(s) to listing ${ref}`)
+    }
+
+    // Increment quantity_listed for each matched card
+    for (const cardId of cardIds) {
+      const { data: cardRow } = await supabase.from('cards').select('quantity_listed').eq('id', cardId).single()
+      if (cardRow) await supabase.from('cards')
+        .update({ quantity_listed: (cardRow.quantity_listed ?? 0) + 1 }).eq('id', cardId)
+    }
+
+    onLog('success', `Created: ${title} @ $${price}${cardIds.length > 1 ? ` (${cardIds.length} cards)` : ''}`)
+    created++
+  }
+
+  return { created, skipped, errorCount }
+}
+
 export default function Import() {
-  const [sheetUrl, setSheetUrl] = useState('https://docs.google.com/spreadsheets/d/e/2PACX-1vTgjSY3ZKa5WFKauWOjlVQfuKCqhQD3p2c485h1jMV_iP8oatHLc_lQn3_4dGDO66VagE2hcTbGZWQ5/pub?output=csv')
-  const [boxesGid, setBoxesGid] = useState('1200631871')
-  const [packsGid, setPacksGid] = useState('894617018')
-  const [status, setStatus]     = useState('idle')
-  const [logs, setLogs]         = useState([])
-  const [preview, setPreview]   = useState(null)
-  const [summary, setSummary]   = useState(null)
+  const [sheetUrl, setSheetUrl]     = useState('https://docs.google.com/spreadsheets/d/e/2PACX-1vTgjSY3ZKa5WFKauWOjlVQfuKCqhQD3p2c485h1jMV_iP8oatHLc_lQn3_4dGDO66VagE2hcTbGZWQ5/pub?output=csv')
+  const [boxesGid, setBoxesGid]     = useState('1200631871')
+  const [packsGid, setPacksGid]     = useState('894617018')
+  const [listingsGid, setListingsGid] = useState('1267977612')
+  const [status, setStatus]         = useState('idle')
+  const [logs, setLogs]             = useState([])
+  const [preview, setPreview]       = useState(null)
+  const [summary, setSummary]       = useState(null)
+  const [activeTab, setActiveTab]   = useState('cards') // 'cards' | 'listings' | 'ebay_csv'
+  const [listingPreview, setListingPreview] = useState(null)
+  const [listingSummary, setListingSummary] = useState(null)
+  const [ebayCsvRows, setEbayCsvRows]     = useState(null)
+  const [ebayCsvSummary, setEbayCsvSummary] = useState(null)
+  const [ebayActiveRows, setEbayActiveRows] = useState(null)
+  const [ebayActiveSummary, setEbayActiveSummary] = useState(null)
 
   const addLog = (type, message) =>
     setLogs(prev => [...prev, { type, message, id: Date.now() + Math.random() }])
 
   async function fetchPreview() {
-    if (!sheetUrl.trim() || !packsGid.trim()) return
-    setStatus('fetching'); setLogs([]); setPreview(null); setSummary(null)
-    const urls = getSheetUrls(sheetUrl, boxesGid, packsGid)
+    if (!sheetUrl.trim()) return
+    setStatus('fetching'); setLogs([])
+    const urls = getSheetUrls(sheetUrl, boxesGid, packsGid, listingsGid)
     if (!urls) { addLog('error', 'Could not parse URL'); setStatus('error'); return }
     try {
-      addLog('info', 'Fetching Cards…')
-      const cardsRes = await fetch(urls.cards)
-      if (!cardsRes.ok) throw new Error(`Cards sheet not accessible (${cardsRes.status})`)
-      const cardRows = parseCsv(await cardsRes.text())
+      if (activeTab === 'cards') {
+        setPreview(null); setSummary(null)
+        addLog('info', 'Fetching Cards…')
+        const cardsRes = await fetch(urls.cards)
+        if (!cardsRes.ok) throw new Error(`Cards sheet not accessible (${cardsRes.status})`)
+        const cardRows = parseCsv(await cardsRes.text())
 
-      addLog('info', 'Fetching Boxes…')
-      const boxRes  = await fetch(urls.boxes)
-      const boxRows = boxRes.ok ? parseCsv(await boxRes.text()) : []
-      if (!boxRes.ok) addLog('warn', 'Boxes sheet not found')
+        addLog('info', 'Fetching Boxes…')
+        const boxRes  = await fetch(urls.boxes)
+        const boxRows = boxRes.ok ? parseCsv(await boxRes.text()) : []
+        if (!boxRes.ok) addLog('warn', 'Boxes sheet not found')
 
-      addLog('info', 'Fetching Packs…')
-      const packRes  = await fetch(urls.packs)
-      const packRows = packRes.ok ? parseCsv(await packRes.text()) : []
-      if (!packRes.ok) addLog('warn', 'Packs sheet not found')
+        addLog('info', 'Fetching Packs…')
+        const packRes  = await fetch(urls.packs)
+        const packRows = packRes.ok ? parseCsv(await packRes.text()) : []
+        if (!packRes.ok) addLog('warn', 'Packs sheet not found')
 
-      addLog('success', `Found ${cardRows.length} cards · ${boxRows.length} boxes · ${packRows.length} packs`)
-      setPreview({ cards: cardRows, boxes: boxRows, packs: packRows })
+        addLog('success', `Found ${cardRows.length} cards · ${boxRows.length} boxes · ${packRows.length} packs`)
+        setPreview({ cards: cardRows, boxes: boxRows, packs: packRows })
+      } else {
+        setListingPreview(null); setListingSummary(null)
+        if (!urls.listings) { addLog('error', 'No listings gid set'); setStatus('error'); return }
+        addLog('info', 'Fetching Listings tab…')
+        const listRes  = await fetch(urls.listings)
+        if (!listRes.ok) throw new Error(`Listings tab not accessible (${listRes.status})`)
+        const listRows = parseCsv(await listRes.text())
+        setListingPreview(listRows)
+        addLog('success', `Found ${listRows.length} listing rows`)
+      }
       setStatus('idle')
     } catch (err) {
       addLog('error', String(err))
@@ -252,208 +349,670 @@ export default function Import() {
     setSummary(result); setStatus('done')
   }
 
+  async function doListingsImport() {
+    if (!listingPreview) return
+    setStatus('importing'); setLogs([])
+    const result = await runListingsImport(listingPreview, addLog)
+    setListingSummary(result); setStatus('done')
+  }
+
   const logColors = {
     success: 'var(--success)', error: 'var(--danger)',
     warn: 'var(--warning)', info: 'var(--text-muted)',
   }
 
+  // Group listing preview rows by ref for display
+  const listingGroups = listingPreview ? Object.entries(
+    listingPreview.reduce((acc, row) => {
+      const ref = row.listing_ref?.trim() || '(no ref)'
+      if (!acc[ref]) acc[ref] = []
+      acc[ref].push(row)
+      return acc
+    }, {})
+  ) : []
+
   return (
-    <div className="page" style={{ maxWidth: 860 }}>
+    <div className="page" style={{ maxWidth: 900 }}>
       <div className="page-header">
         <h1 className="page-title">Bulk Import</h1>
-        <p className="page-subtitle">Import boxes → packs → cards · safe to re-run, skips existing records</p>
+        <p className="page-subtitle">Import boxes, packs, cards, and eBay listings from Google Sheets</p>
       </div>
 
-      {/* Sheet structure */}
-      <div className="panel mb-16">
-        <div className="panel-header"><span className="panel-title">Google Sheet structure — 3 tabs</span></div>
-        <div className="panel-body" style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+      {/* Tab selector */}
+      <div style={{ display: 'flex', gap: 4, marginBottom: 20 }}>
+        {[['cards', 'Cards / Boxes / Packs'], ['listings', 'eBay Listings'], ['ebay_csv', 'eBay Order History']].map(([id, label]) => (
+          <button key={id} className={`btn btn-sm ${activeTab === id ? 'btn-primary' : 'btn-ghost'}`}
+            onClick={() => setActiveTab(id)}>{label}</button>
+        ))}
+      </div>
 
-          {[
-            {
-              tab: 'Cards',
-              cols: 'name | set_name | set_code | rarity | foil | pack_ref | tcgplayer_id | notes',
-              note: 'Condition defaults to near_mint. Quantity is always 1 per pack pull. pack_ref links to the Packs tab.',
-            },
-            {
-              tab: 'Boxes',
-              cols: 'ref | name | set_name | box_type | purchase_price | pack_count | pack_msrp | purchased_at | seller | notes',
-              note: 'ref is a short unique ID e.g. "gothic_box1". pack_count=36, pack_msrp=5',
-            },
-            {
-              tab: 'Packs',
-              cols: 'ref | box_ref | pack_number | opened_at | notes',
-              note: 'box_ref matches the ref in Boxes. ref is e.g. "gothic_box1_p01"',
-            },
-          ].map(({ tab, cols, note }) => (
-            <div key={tab} style={{ marginBottom: 14 }}>
-              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:5 }}>
-                <span style={{ background:'var(--bg-raised)', border:'1px solid var(--border)', borderRadius:4, padding:'1px 8px', fontSize:11, fontWeight:500, color:'var(--gold-light)' }}>{tab}</span>
-              </div>
-              <div style={{ fontFamily:'monospace', fontSize:11, background:'var(--bg-void)', padding:'8px 12px', borderRadius:6, marginBottom:4, overflowX:'auto', whiteSpace:'nowrap' }}>{cols}</div>
-              <div style={{ fontSize:12, color:'var(--text-muted)' }}>↳ {note}</div>
-            </div>
-          ))}
-
-          {/* Rarity guide */}
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginTop:8 }}>
-            <div>
-              <div style={{ fontSize:11, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:6 }}>Rarity values</div>
-              {[['unique','u'],['elite','el'],['exceptional','e'],['ordinary','o']].map(([v,s]) => (
-                <div key={v} style={{ fontSize:12, marginBottom:3 }}>
-                  <span style={{ color:'var(--text-primary)' }}>{v}</span>
-                  <span style={{ color:'var(--text-muted)' }}> or </span>
-                  <span style={{ color:'var(--text-primary)' }}>{s}</span>
+      {/* ── Cards / Boxes / Packs tab ── */}
+      {activeTab === 'cards' && (
+        <>
+          {/* Sheet structure */}
+          <div className="panel mb-16">
+            <div className="panel-header"><span className="panel-title">Google Sheet structure — 3 tabs</span></div>
+            <div className="panel-body" style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+              {[
+                { tab: 'Cards', cols: 'name | set_name | set_code | rarity | foil | pack_ref | tcgplayer_id | notes', note: 'Condition defaults to near_mint. Quantity is always 1 per pack pull.' },
+                { tab: 'Boxes', cols: 'ref | name | set_name | box_type | purchase_price | pack_count | pack_msrp | purchased_at | seller | notes', note: 'ref is a short unique ID e.g. "gothic_box1".' },
+                { tab: 'Packs', cols: 'ref | box_ref | pack_number | opened_at | notes', note: 'box_ref matches the ref in Boxes.' },
+              ].map(({ tab, cols, note }) => (
+                <div key={tab} style={{ marginBottom: 14 }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:5 }}>
+                    <span style={{ background:'var(--bg-raised)', border:'1px solid var(--border)', borderRadius:4, padding:'1px 8px', fontSize:11, fontWeight:500, color:'var(--gold-light)' }}>{tab}</span>
+                  </div>
+                  <div style={{ fontFamily:'monospace', fontSize:11, background:'var(--bg-void)', padding:'8px 12px', borderRadius:6, marginBottom:4 }}>{cols}</div>
+                  <div style={{ fontSize:12, color:'var(--text-muted)' }}>↳ {note}</div>
                 </div>
               ))}
-            </div>
-            <div>
-              <div style={{ fontSize:11, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:6 }}>Box type values</div>
-              {[['booster_box'],['prerelease_kit'],['bundle'],['other']].map(([v]) => (
-                <div key={v} style={{ fontSize:12, marginBottom:3, color:'var(--text-primary)' }}>{v}</div>
-              ))}
+              <div style={{ background:'var(--info-bg)', border:'1px solid rgba(76,132,201,0.25)', borderRadius:8, padding:'10px 14px', fontSize:12, marginTop:8 }}>
+                <strong style={{ color:'var(--info)' }}>Safe to re-run:</strong> Skips boxes, packs, and cards that already exist.
+              </div>
             </div>
           </div>
 
-          <div style={{ background:'var(--info-bg)', border:'1px solid rgba(76,132,201,0.25)', borderRadius:8, padding:'10px 14px', fontSize:12, marginTop:12 }}>
-            <strong style={{ color:'var(--info)' }}>Safe to re-run:</strong> The import skips boxes, packs, and cards that already exist. Only new records are inserted.
+          {/* Inputs */}
+          <div className="panel mb-16">
+            <div className="panel-header"><span className="panel-title">Your sheet details</span></div>
+            <div className="panel-body">
+              <div className="form-group">
+                <label className="form-label">Published sheet URL</label>
+                <input className="form-input" value={sheetUrl} onChange={e => setSheetUrl(e.target.value)} />
+              </div>
+              <div className="form-row">
+                <div className="form-group">
+                  <label className="form-label">Boxes tab gid</label>
+                  <input className="form-input" placeholder="e.g. 1200631871" value={boxesGid} onChange={e => setBoxesGid(e.target.value)} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Packs tab gid</label>
+                  <input className="form-input" placeholder="Click Packs tab, get gid from URL" value={packsGid} onChange={e => setPacksGid(e.target.value)} />
+                </div>
+              </div>
+              <button className="btn btn-primary" onClick={fetchPreview}
+                disabled={!sheetUrl.trim() || status === 'fetching'}>
+                {status === 'fetching' ? 'Fetching…' : 'Preview import'}
+              </button>
+            </div>
           </div>
-          <div style={{ background:'var(--warning-bg)', border:'1px solid rgba(201,137,76,0.25)', borderRadius:8, padding:'10px 14px', fontSize:12, marginTop:8 }}>
-            <strong style={{ color:'var(--warning)' }}>Publish each tab:</strong> File → Share → Publish to web → select tab → CSV → Publish. Get gid from URL when clicking each tab (#gid=XXXXXXXX).
-          </div>
-        </div>
-      </div>
 
-      {/* Example */}
-      <div className="panel mb-16">
-        <div className="panel-header"><span className="panel-title">Example — 1 box · 2 packs · 4 cards</span></div>
-        <div className="panel-body" style={{ fontSize:12, display:'flex', flexDirection:'column', gap:14 }}>
-          {[
-            {
-              label: 'Boxes',
-              rows: [
-                ['ref','name', 'set_name','box_type','purchase_price','pack_count','pack_msrp'],
-                ['gothic_box1','Gothic Box 1','Gothic','booster_box','180','36','5'],
-              ]
-            },
-            {
-              label: 'Packs',
-              rows: [
-                ['ref','box_ref','pack_number','opened_at'],
-                ['gothic_box1_p01','gothic_box1','1','2026-05-20'],
-                ['gothic_box1_p02','gothic_box1','2','2026-05-20'],
-              ]
-            },
-            {
-              label: 'Cards (simplified)',
-              rows: [
-                ['name','set_name','rarity','foil','pack_ref','tcgplayer_id'],
-                ['Fertile Earth','Gothic','exceptional','','gothic_box1_p01','656589'],
-                ['Accusation','Gothic','exceptional','','gothic_box1_p01','656590'],
-                ['Kissers of Wounds','Gothic','exceptional','','gothic_box1_p02','656591'],
-                ['The Doom of Dilmun','Gothic','unique','','gothic_box1_p02','656592'],
-              ]
-            },
-          ].map(({ label, rows }) => (
-            <div key={label}>
-              <div style={{ fontSize:11, color:'var(--text-muted)', marginBottom:5, textTransform:'uppercase', letterSpacing:'0.08em' }}>{label}</div>
-              <table style={{ borderCollapse:'collapse', fontSize:11, fontFamily:'monospace' }}>
-                {rows.map((row, i) => (
+          {/* Preview */}
+          {preview && (
+            <div className="panel mb-16">
+              <div className="panel-header">
+                <span className="panel-title">Preview</span>
+                <div style={{ fontSize:12, color:'var(--text-muted)', display:'flex', gap:16 }}>
+                  <span>{preview.boxes.length} boxes</span>
+                  <span>{preview.packs.length} packs</span>
+                  <span>{preview.cards.length} cards</span>
+                </div>
+              </div>
+              <table className="data-table">
+                <thead><tr>
+                  <th>Name</th><th>Set</th><th>Rarity</th><th>Foil</th><th>Pack ref</th><th>TCGPlayer ID</th>
+                </tr></thead>
+                <tbody>
+                  {preview.cards.slice(0, 20).map((row, i) => {
+                    const c = normalizeCard(row)
+                    return (
+                      <tr key={i}>
+                        <td className="name-cell">{c.name || <span className="text-danger">missing!</span>}</td>
+                        <td>{c.set_name}</td>
+                        <td><span className={`badge badge-${c.rarity}`}>{c.rarity}</span></td>
+                        <td>{c.foil ? '✓' : ''}</td>
+                        <td style={{ fontSize:11, color:'var(--text-muted)' }}>{c._pack_ref || '—'}</td>
+                        <td style={{ fontSize:11, color:'var(--text-muted)' }}>{row.tcgplayer_id || '—'}</td>
+                      </tr>
+                    )
+                  })}
+                  {preview.cards.length > 20 && (
+                    <tr><td colSpan={6} style={{ textAlign:'center', color:'var(--text-muted)', fontSize:12 }}>…and {preview.cards.length - 20} more</td></tr>
+                  )}
+                </tbody>
+              </table>
+              <div style={{ padding:'14px 20px', borderTop:'1px solid var(--border)', display:'flex', justifyContent:'flex-end' }}>
+                <button className="btn btn-primary" onClick={doImport} disabled={status === 'importing'}>
+                  {status === 'importing' ? '⟳ Importing…' : `Import ${preview.boxes.length} boxes · ${preview.packs.length} packs · ${preview.cards.length} cards`}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {summary && (
+            <div className={`alert-item ${summary.errorCount === 0 ? 'success' : 'warning'}`}>
+              <span className="alert-icon">{summary.errorCount === 0 ? '✓' : '⚠️'}</span>
+              <div className="alert-content">
+                <div className="alert-title">Import complete</div>
+                <div className="alert-desc">
+                  {summary.boxCount} new boxes · {summary.packCount} new packs · {summary.cardCount} new cards · {summary.skipped} skipped · {summary.errorCount} errors
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ── eBay Listings tab ── */}
+      {activeTab === 'listings' && (
+        <>
+          {/* Schema */}
+          <div className="panel mb-16">
+            <div className="panel-header"><span className="panel-title">Listings tab structure</span></div>
+            <div className="panel-body" style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+              <div style={{ fontFamily:'monospace', fontSize:11, background:'var(--bg-void)', padding:'8px 12px', borderRadius:6, marginBottom:8 }}>
+                listing_ref | card_name | set_name | foil | price | shipping | status | sold_date | ebay_url | notes
+              </div>
+              <div style={{ fontSize:12, color:'var(--text-muted)', marginBottom:12 }}>
+                ↳ One row per card. Cards with the same <code style={{ background:'var(--bg-void)', padding:'1px 5px', borderRadius:4 }}>listing_ref</code> are grouped into one eBay listing. Price, shipping, condition, ebay_url and notes are taken from the first row of each group.
+              </div>
+
+              {/* Example table */}
+              <div style={{ fontSize:11, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'0.08em', marginBottom:6 }}>Example</div>
+              <table style={{ borderCollapse:'collapse', fontSize:11, fontFamily:'monospace', marginBottom:12 }}>
+                {[
+                  ['listing_ref','card_name','set_name','foil','price','shipping','status','sold_date','ebay_url','notes'],
+                  ['lot_001','Dragul','Gothic','false','12.50','4.00','active','','https://ebay.com/itm/123',''],
+                  ['lot_001','Thornwood','Gothic','false','','','',''],
+                  ['lot_002','Accusation','Gothic','false','15.00','4.00','sold','2026-05-20','',''],
+                ].map((row, i) => (
                   <tr key={i} style={{ background: i===0 ? 'var(--bg-raised)' : 'transparent' }}>
                     {row.map((cell, j) => (
-                      <td key={j} style={{ padding:'3px 10px', border:'1px solid var(--border)', color: i===0 ? 'var(--text-muted)' : 'var(--text-primary)' }}>{cell}</td>
+                      <td key={j} style={{ padding:'3px 10px', border:'1px solid var(--border)', color: i===0 ? 'var(--text-muted)' : 'var(--text-primary)' }}>{cell || <span style={{ color:'var(--text-muted)' }}>—</span>}</td>
                     ))}
                   </tr>
                 ))}
               </table>
-            </div>
-          ))}
-        </div>
-      </div>
 
-      {/* Inputs */}
-      <div className="panel mb-16">
-        <div className="panel-header"><span className="panel-title">Your sheet details</span></div>
-        <div className="panel-body">
-          <div className="form-group">
-            <label className="form-label">Published sheet URL</label>
-            <input className="form-input" placeholder="https://docs.google.com/spreadsheets/d/e/2PACX-.../pub?..." value={sheetUrl} onChange={e => setSheetUrl(e.target.value)} />
-          </div>
-          <div className="form-row">
-            <div className="form-group">
-              <label className="form-label">Boxes tab gid</label>
-              <input className="form-input" placeholder="e.g. 1200631871" value={boxesGid} onChange={e => setBoxesGid(e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Packs tab gid</label>
-              <input className="form-input" placeholder="Click Packs tab, get gid from URL" value={packsGid} onChange={e => setPacksGid(e.target.value)} />
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:8 }}>
+                <div style={{ background:'var(--info-bg)', border:'1px solid rgba(76,132,201,0.25)', borderRadius:8, padding:'10px 14px', fontSize:12 }}>
+                  <strong style={{ color:'var(--info)' }}>Safe to re-run:</strong> Each listing_ref is tagged internally — duplicates are skipped.
+                </div>
+                <div style={{ background:'var(--warning-bg)', border:'1px solid rgba(201,137,76,0.25)', borderRadius:8, padding:'10px 14px', fontSize:12 }}>
+                  <strong style={{ color:'var(--warning)' }}>Card matching:</strong> Matched by name + set_name. Card must already exist in inventory.
+                </div>
+              </div>
             </div>
           </div>
-          <button className="btn btn-primary" onClick={fetchPreview}
-            disabled={!sheetUrl.trim() || !packsGid.trim() || status === 'fetching'}>
-            {status === 'fetching' ? 'Fetching…' : 'Preview import'}
-          </button>
-        </div>
-      </div>
 
-      {/* Preview */}
-      {preview && (
-        <div className="panel mb-16">
-          <div className="panel-header">
-            <span className="panel-title">Preview</span>
-            <div style={{ fontSize:12, color:'var(--text-muted)', display:'flex', gap:16 }}>
-              <span>{preview.boxes.length} boxes</span>
-              <span>{preview.packs.length} packs</span>
-              <span>{preview.cards.length} cards</span>
+          {/* Inputs */}
+          <div className="panel mb-16">
+            <div className="panel-header"><span className="panel-title">Sheet details</span></div>
+            <div className="panel-body">
+              <div className="form-group">
+                <label className="form-label">Published sheet URL</label>
+                <input className="form-input" value={sheetUrl} onChange={e => setSheetUrl(e.target.value)} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Listings tab gid</label>
+                <input className="form-input" placeholder="Click Listings tab, get gid from URL" value={listingsGid} onChange={e => setListingsGid(e.target.value)} />
+              </div>
+              <button className="btn btn-primary" onClick={fetchPreview}
+                disabled={!sheetUrl.trim() || !listingsGid.trim() || status === 'fetching'}>
+                {status === 'fetching' ? 'Fetching…' : 'Preview listings'}
+              </button>
             </div>
           </div>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Set</th>
-                <th>Rarity</th>
-                <th>Foil</th>
-                <th>Pack ref</th>
-                <th>TCGPlayer ID</th>
-              </tr>
-            </thead>
-            <tbody>
-              {preview.cards.slice(0, 20).map((row, i) => {
-                const c = normalizeCard(row)
-                return (
-                  <tr key={i}>
-                    <td className="name-cell">{c.name || <span className="text-danger">missing!</span>}</td>
-                    <td>{c.set_name}</td>
-                    <td><span className={`badge badge-${c.rarity}`}>{c.rarity}</span></td>
-                    <td>{c.foil ? '✓' : ''}</td>
-                    <td style={{ fontSize:11, color:'var(--text-muted)' }}>{c._pack_ref || '—'}</td>
-                    <td style={{ fontSize:11, color:'var(--text-muted)' }}>{row.tcgplayer_id || '—'}</td>
-                  </tr>
-                )
-              })}
-              {preview.cards.length > 20 && (
-                <tr>
-                  <td colSpan={6} style={{ textAlign:'center', color:'var(--text-muted)', fontSize:12 }}>
-                    …and {preview.cards.length - 20} more
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-          <div style={{ padding:'14px 20px', borderTop:'1px solid var(--border)', display:'flex', justifyContent:'flex-end' }}>
-            <button className="btn btn-primary" onClick={doImport} disabled={status === 'importing'}>
-              {status === 'importing'
-                ? '⟳ Importing…'
-                : `Import ${preview.boxes.length} boxes · ${preview.packs.length} packs · ${preview.cards.length} cards`}
-            </button>
-          </div>
-        </div>
+
+          {/* Listing preview */}
+          {listingPreview && listingGroups.length > 0 && (
+            <div className="panel mb-16">
+              <div className="panel-header">
+                <span className="panel-title">Preview — {listingGroups.length} listings</span>
+                <span style={{ fontSize:12, color:'var(--text-muted)' }}>{listingPreview.length} rows</span>
+              </div>
+              <table className="data-table">
+                <thead><tr>
+                  <th>Ref</th><th>Cards</th><th className="text-right">Price</th>
+                  <th className="text-right">Shipping</th><th>Foil</th><th>Status</th><th>eBay URL</th>
+                </tr></thead>
+                <tbody>
+                  {listingGroups.slice(0, 20).map(([ref, rows]) => {
+                    const first = rows[0]
+                    const cardNames = rows.map(r => r.card_name?.trim()).filter(Boolean)
+                    const hasFoil = rows.some(r => ['true','yes','1','foil'].includes(r.foil?.toLowerCase()))
+                    const listingStatus = (first.status||'active').toLowerCase()
+                    return (
+                      <tr key={ref}>
+                        <td style={{ fontSize:11, color:'var(--text-muted)', fontFamily:'monospace' }}>{ref}</td>
+                        <td>
+                          {cardNames.map((name, i) => (
+                            <div key={i} className="name-cell" style={{ fontSize:12 }}>{name}</div>
+                          ))}
+                        </td>
+                        <td className="text-right text-gold">${parseFloat(first.price||0).toFixed(2)}</td>
+                        <td className="text-right text-muted">${parseFloat(first.shipping||0).toFixed(2)}</td>
+                        <td style={{ color: 'var(--gold)' }}>{hasFoil ? '✦' : '—'}</td>
+                        <td><span className={`badge ${listingStatus === 'sold' ? 'badge-ok' : 'badge-active'}`}>{listingStatus}</span></td>
+                        <td>
+                          {first.ebay_url ? (
+                            <a href={first.ebay_url} target="_blank" rel="noreferrer"
+                              style={{ fontSize:11, color:'var(--info)', textDecoration:'none' }}>View ↗</a>
+                          ) : <span className="text-muted">—</span>}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                  {listingGroups.length > 20 && (
+                    <tr><td colSpan={7} style={{ textAlign:'center', color:'var(--text-muted)', fontSize:12 }}>…and {listingGroups.length - 20} more</td></tr>
+                  )}
+                </tbody>
+              </table>
+              <div style={{ padding:'14px 20px', borderTop:'1px solid var(--border)', display:'flex', justifyContent:'flex-end' }}>
+                <button className="btn btn-primary" onClick={doListingsImport} disabled={status === 'importing'}>
+                  {status === 'importing' ? '⟳ Importing…' : `Import ${listingGroups.length} listings`}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {listingSummary && (
+            <div className={`alert-item ${listingSummary.errorCount === 0 ? 'success' : 'warning'}`}>
+              <span className="alert-icon">{listingSummary.errorCount === 0 ? '✓' : '⚠️'}</span>
+              <div className="alert-content">
+                <div className="alert-title">Listings import complete</div>
+                <div className="alert-desc">
+                  {listingSummary.created} created · {listingSummary.skipped} skipped · {listingSummary.errorCount} errors
+                </div>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
-      {/* Log */}
+
+      {/* ── eBay Order History CSV tab ── */}
+      {activeTab === 'ebay_csv' && (
+        <>
+          <div className="panel mb-16">
+            <div className="panel-header"><span className="panel-title">Import from eBay Order History CSV</span></div>
+            <div className="panel-body" style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+              <p style={{ marginBottom: 12 }}>Download your order history from <strong style={{ color: 'var(--text-primary)' }}>eBay Seller Hub → Orders → Download report</strong>, then upload the CSV file here.</p>
+              <p style={{ marginBottom: 8, fontSize: 12, color: 'var(--text-muted)' }}>
+                To link sold items to inventory, add two columns to a separate sheet and paste matching data:
+              </p>
+              <div style={{ fontFamily: 'monospace', fontSize: 11, background: 'var(--bg-void)', padding: '8px 12px', borderRadius: 6, marginBottom: 8 }}>
+                order_number | tcgplayer_id | card_name
+              </div>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 12 }}>
+                ↳ <strong style={{ color: 'var(--text-primary)' }}>tcgplayer_id</strong> takes priority. Falls back to card_name. Leave blank to skip inventory update.
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                <div style={{ background: 'var(--info-bg)', border: '1px solid rgba(76,132,201,0.25)', borderRadius: 8, padding: '10px 14px', fontSize: 12 }}>
+                  <strong style={{ color: 'var(--info)' }}>What gets imported:</strong> Each order becomes a sold listing. Multi-item orders are grouped by order number.
+                </div>
+                <div style={{ background: 'var(--warning-bg)', border: '1px solid rgba(201,137,76,0.25)', borderRadius: 8, padding: '10px 14px', fontSize: 12 }}>
+                  <strong style={{ color: 'var(--warning)' }}>Dedup:</strong> Orders already imported (matched by eBay order number) are skipped.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="panel mb-16">
+            <div className="panel-header"><span className="panel-title">Upload CSV</span></div>
+            <div className="panel-body">
+              <div className="form-group">
+                <label className="form-label">eBay Orders CSV file</label>
+                <input
+                  type="file"
+                  accept=".csv"
+                  className="form-input"
+                  onChange={async e => {
+                    const file = e.target.files?.[0]
+                    if (!file) return
+                    const text = await file.text()
+                    // Skip first blank row, parse from second row
+                    const lines = text.split('\n').filter(l => l.trim() && l.trim() !== ','.repeat(40))
+                    const headerLine = lines.find(l => l.includes('Sales Record Number'))
+                    if (!headerLine) { addLog('error', 'Could not find header row — make sure this is an eBay Orders CSV'); return }
+                    const headerIdx = lines.indexOf(headerLine)
+                    const csvText = lines.slice(headerIdx).join('\n')
+                    const rows = parseCsv(csvText)
+                    // Forward-fill order_number — eBay only puts it on the first row of multi-item orders
+                    let lastOrderNum = ''
+                    let lastSalesRef = ''
+                    const filledRows = rows.map(row => {
+                      if (row.order_number?.trim()) lastOrderNum = row.order_number.trim()
+                      if (row.sales_record_number?.trim()) lastSalesRef = row.sales_record_number.trim()
+                      return { ...row, order_number: lastOrderNum, sales_record_number: lastSalesRef }
+                    })
+                    const validRows = filledRows.filter(r => r.item_number?.trim() || r.sold_for?.trim())
+                    setEbayCsvRows(validRows)
+                    addLog('success', `Parsed ${validRows.length} order rows from CSV`)
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Preview */}
+          {ebayCsvRows && ebayCsvRows.length > 0 && (() => {
+            // Group by order_number (forward-filled at parse time)
+            const orders = {}
+            ebayCsvRows.forEach(row => {
+              const key = row.order_number?.trim() || row.sales_record_number?.trim() || 'unknown'
+              if (!orders[key]) orders[key] = []
+              orders[key].push(row)
+            })
+            const orderList = Object.entries(orders)
+            return (
+              <div className="panel mb-16">
+                <div className="panel-header">
+                  <span className="panel-title">Preview — {orderList.length} orders</span>
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{ebayCsvRows.length} line items</span>
+                </div>
+                <table className="data-table">
+                  <thead><tr>
+                    <th>Order #</th>
+                    <th>Title(s)</th>
+                    <th className="text-right">Sold for</th>
+                    <th className="text-right">Shipping</th>
+                    <th className="text-right">eBay fee</th>
+                    <th>Date</th>
+                  </tr></thead>
+                  <tbody>
+                    {orderList.slice(0, 20).map(([orderNum, rows]) => {
+                      const first = rows[0]
+                      const totalSold = rows.reduce((s, r) => s + (parseFloat(r.sold_for?.replace('$','')) || 0), 0)
+                      const totalShipping = 5.00  // fixed default
+                      const totalFee = rows.reduce((s, r) => s + (parseFloat(r.ebay_collected_tax?.replace('$','')) || 0), 0)
+                      return (
+                        <tr key={orderNum}>
+                          <td style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--text-muted)' }}>{first.sales_record_number}</td>
+                          <td>
+                            {rows.filter(r => r.item_title).map((r, i) => (
+                              <div key={i} className="name-cell" style={{ fontSize: 12 }}>{r.item_title}</div>
+                            ))}
+                          </td>
+                          <td className="text-right text-gold">${totalSold.toFixed(2)}</td>
+                          <td className="text-right text-muted">${totalShipping.toFixed(2)}</td>
+                          <td className="text-right text-muted">${totalFee.toFixed(2)}</td>
+                          <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{first.sale_date}</td>
+                        </tr>
+                      )
+                    })}
+                    {orderList.length > 20 && (
+                      <tr><td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>…and {orderList.length - 20} more orders</td></tr>
+                    )}
+                  </tbody>
+                </table>
+                <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end' }}>
+                  <button className="btn btn-primary" disabled={status === 'importing'}
+                    onClick={async () => {
+                      setStatus('importing'); setLogs([])
+                      let created = 0, skipped = 0, errorCount = 0
+
+                      // Group by order_number (already forward-filled at parse time)
+                      const orders = {}
+                      ebayCsvRows.forEach(row => {
+                        const key = row.order_number?.trim() || row.sales_record_number?.trim() || 'unknown'
+                        if (!orders[key]) orders[key] = []
+                        orders[key].push(row)
+                      })
+
+                      for (const [orderNum, rows] of Object.entries(orders)) {
+                        const first = rows[0]
+                        const salesRef = first.sales_record_number?.trim()
+
+                        // Dedup by order_number in notes
+                        const { data: existing } = await supabase
+                          .from('ebay_listings')
+                          .select('id')
+                          .ilike('notes', `%ebay_order:${orderNum}%`)
+                          .maybeSingle()
+                        if (existing) { addLog('info', `Skipped (exists): order ${salesRef}`); skipped++; continue }
+
+                        const totalSold     = rows.reduce((s, r) => s + (parseFloat(r.sold_for?.replace('$','')) || 0), 0)
+                        const totalShipping = 5.00  // fixed default shipping cost
+                        const totalFee      = rows.reduce((s, r) => s + (parseFloat(r.ebay_collected_tax?.replace('$','')) || 0), 0)
+                        const ebayFee       = parseFloat((totalSold * 0.129 + 0.30).toFixed(2))
+                        const netProfit     = parseFloat((totalSold - ebayFee - totalShipping).toFixed(2))
+
+                        const titles = rows.filter(r => r.item_title).map(r => r.item_title)
+                        const title  = titles.length === 1 ? titles[0] : `eBay Order ${salesRef} — ${titles.length} items`
+
+                        const saleDate = first.sale_date
+                          ? new Date(first.sale_date.replace(/-/g, ' ')).toISOString()
+                          : new Date().toISOString()
+
+                        const ebayItemNum = rows.find(r => r.item_number)?.item_number
+                        const ebayUrl = ebayItemNum ? `https://www.ebay.com/itm/${ebayItemNum}` : null
+
+                        const notes = [
+                          titles.length > 1 ? `Items: ${titles.join(', ')}` : null,
+                          `ebay_order:${orderNum}`,
+                          `Sales record: ${salesRef}`,
+                        ].filter(Boolean).join('\n')
+
+                        // Match card via tcgplayer_id or card_name from extra columns
+                        let matchedCardId = null
+                        const tcgId   = first.tcgplayer_id?.trim()
+                        const cardName = first.card_name?.trim()
+
+                        if (tcgId) {
+                          const { data: cardMatch } = await supabase
+                            .from('cards').select('id, quantity_owned, quantity_listed')
+                            .eq('tcgplayer_id', tcgId).maybeSingle()
+                          if (cardMatch) matchedCardId = cardMatch
+                        } else if (cardName) {
+                          const { data: cardMatch } = await supabase
+                            .from('cards').select('id, quantity_owned, quantity_listed')
+                            .ilike('name', cardName).maybeSingle()
+                          if (cardMatch) matchedCardId = cardMatch
+                        }
+
+                        const { data: newListing, error } = await supabase.from('ebay_listings').insert({
+                          card_id:       matchedCardId?.id ?? null,
+                          title,
+                          listed_price:  totalSold,
+                          shipping_cost: totalShipping,
+                          sold_price:    totalSold,
+                          sold_shipping: totalShipping,
+                          sold_ebay_fee: ebayFee,
+                          net_profit:    netProfit,
+                          sold_at:       saleDate,
+                          status:        'sold',
+                          ebay_url:      ebayUrl,
+                          notes,
+                          cost_basis:    matchedCardId ? null : null,
+                        }).select('id').single()
+
+                        if (error) {
+                          addLog('error', `Order ${salesRef}: ${error.message}`)
+                          errorCount++; continue
+                        }
+
+                        // Update inventory if card was matched
+                        if (matchedCardId) {
+                          await supabase.from('cards').update({
+                            quantity_owned: Math.max(0, (matchedCardId.quantity_owned ?? 0) - 1),
+                          }).eq('id', matchedCardId.id)
+                          addLog('info', `Matched card: ${cardName || tcgId} — inventory updated`)
+                        } else if (tcgId || cardName) {
+                          addLog('warn', `Card not found in inventory: ${cardName || tcgId}`)
+                        }
+
+                        addLog('success', `Imported order ${salesRef}: ${title} @ $${totalSold.toFixed(2)}`)
+                        created++
+                      }
+
+                      setEbayCsvSummary({ created, skipped, errorCount })
+                      setStatus('done')
+                    }}
+                  >
+                    {status === 'importing' ? '⟳ Importing…' : `Import ${Object.keys((() => { const o = {}; ebayCsvRows.forEach(r => { const k = r.order_number?.trim() || 'unknown'; if (!o[k]) o[k] = []; o[k].push(r) }); return o })()).length} orders`}
+                  </button>
+                </div>
+              </div>
+            )
+          })()}
+
+          {ebayCsvSummary && (
+            <div className={`alert-item ${ebayCsvSummary.errorCount === 0 ? 'success' : 'warning'}`}>
+              <span className="alert-icon">{ebayCsvSummary.errorCount === 0 ? '✓' : '⚠️'}</span>
+              <div className="alert-content">
+                <div className="alert-title">eBay order import complete</div>
+                <div className="alert-desc">
+                  {ebayCsvSummary.created} orders imported · {ebayCsvSummary.skipped} skipped · {ebayCsvSummary.errorCount} errors
+                </div>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+
+          {/* ── Active Listings CSV ── */}
+          <div className="panel mb-16" style={{ marginTop: 24 }}>
+            <div className="panel-header"><span className="panel-title">Import Active Listings</span></div>
+            <div className="panel-body" style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+              <p style={{ marginBottom: 12 }}>Download from <strong style={{ color: 'var(--text-primary)' }}>eBay Seller Hub → Listings → Active → Download (.csv)</strong></p>
+              <div className="form-group">
+                <label className="form-label">Active Listings CSV file</label>
+                <input
+                  type="file"
+                  accept=".csv"
+                  className="form-input"
+                  onChange={async e => {
+                    const file = e.target.files?.[0]
+                    if (!file) return
+                    const text = await file.text()
+                    const rows = parseCsv(text)
+                    const valid = rows.filter(r => r.item_number && r.current_price)
+                    setEbayActiveRows(valid)
+                    addLog('success', `Parsed ${valid.length} active listings from CSV`)
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+
+          {ebayActiveRows && ebayActiveRows.length > 0 && (
+            <div className="panel mb-16">
+              <div className="panel-header">
+                <span className="panel-title">Preview — {ebayActiveRows.length} active listings</span>
+              </div>
+              <table className="data-table">
+                <thead><tr>
+                  <th>Title</th>
+                  <th className="text-right">Price</th>
+                  <th className="text-right">Qty</th>
+                  <th>Listed</th>
+                </tr></thead>
+                <tbody>
+                  {ebayActiveRows.slice(0, 20).map((row, i) => (
+                    <tr key={i}>
+                      <td className="name-cell" style={{ fontSize: 12 }}>{row.title}</td>
+                      <td className="text-right text-gold">${parseFloat(row.current_price || 0).toFixed(2)}</td>
+                      <td className="text-right">{row.available_quantity || 1}</td>
+                      <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{row.start_date?.split(' ')[0]}</td>
+                    </tr>
+                  ))}
+                  {ebayActiveRows.length > 20 && (
+                    <tr><td colSpan={4} style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: 12 }}>…and {ebayActiveRows.length - 20} more</td></tr>
+                  )}
+                </tbody>
+              </table>
+              <div style={{ padding: '14px 20px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end' }}>
+                <button className="btn btn-primary" disabled={status === 'importing'}
+                  onClick={async () => {
+                    setStatus('importing'); setLogs([])
+                    let created = 0, skipped = 0, errorCount = 0
+
+                    for (const row of ebayActiveRows) {
+                      const itemNum = row.item_number?.trim()
+                      const title   = row.title?.trim()
+                      const price   = parseFloat(row.current_price || 0)
+                      if (!itemNum || !price) continue
+
+                      // Dedup by eBay item number in notes
+                      const { data: existing } = await supabase
+                        .from('ebay_listings')
+                        .select('id')
+                        .ilike('notes', `%ebay_item:${itemNum}%`)
+                        .maybeSingle()
+                      if (existing) { addLog('info', `Skipped (exists): ${itemNum}`); skipped++; continue }
+
+                      // Also check by ebay_url
+                      const { data: existingUrl } = await supabase
+                        .from('ebay_listings')
+                        .select('id')
+                        .eq('ebay_url', `https://www.ebay.com/itm/${itemNum}`)
+                        .maybeSingle()
+                      if (existingUrl) { addLog('info', `Skipped (exists by URL): ${itemNum}`); skipped++; continue }
+
+                      const listedAt = row.start_date
+                        ? new Date(row.start_date.replace(/-/g, ' ')).toISOString()
+                        : new Date().toISOString()
+
+                      // Match card via tcgplayer_id or card_name
+                      let matchedCard = null
+                      const tcgId    = row.tcgplayer_id?.trim()
+                      const cardName = row.card_name?.trim()
+
+                      if (tcgId) {
+                        const { data: m } = await supabase.from('cards').select('id, quantity_listed').eq('tcgplayer_id', tcgId).maybeSingle()
+                        if (m) matchedCard = m
+                      } else if (cardName) {
+                        const { data: m } = await supabase.from('cards').select('id, quantity_listed').ilike('name', cardName).maybeSingle()
+                        if (m) matchedCard = m
+                      }
+
+                      const { error } = await supabase.from('ebay_listings').insert({
+                        card_id:       matchedCard?.id ?? null,
+                        title,
+                        listed_price:  price,
+                        shipping_cost: 5.00,
+                        status:        'active',
+                        ebay_url:      `https://www.ebay.com/itm/${itemNum}`,
+                        listed_at:     listedAt,
+                        notes:         `ebay_item:${itemNum}`,
+                      })
+
+                      if (error) {
+                        addLog('error', `${itemNum}: ${error.message}`)
+                        errorCount++; continue
+                      }
+
+                      // Increment quantity_listed if card matched
+                      if (matchedCard) {
+                        await supabase.from('cards').update({
+                          quantity_listed: (matchedCard.quantity_listed ?? 0) + 1
+                        }).eq('id', matchedCard.id)
+                        addLog('info', `Matched: ${cardName || tcgId} — quantity_listed updated`)
+                      } else if (tcgId || cardName) {
+                        addLog('warn', `Card not found: ${cardName || tcgId}`)
+                      }
+
+                      addLog('success', `Imported: ${title} @ $${price.toFixed(2)}`)
+                      created++
+                    }
+
+                    setEbayActiveSummary({ created, skipped, errorCount })
+                    setStatus('done')
+                  }}
+                >
+                  {status === 'importing' ? '⟳ Importing…' : `Import ${ebayActiveRows.length} active listings`}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {ebayActiveSummary && (
+            <div className={`alert-item ${ebayActiveSummary.errorCount === 0 ? 'success' : 'warning'}`}>
+              <span className="alert-icon">{ebayActiveSummary.errorCount === 0 ? '✓' : '⚠️'}</span>
+              <div className="alert-content">
+                <div className="alert-title">Active listings import complete</div>
+                <div className="alert-desc">
+                  {ebayActiveSummary.created} created · {ebayActiveSummary.skipped} skipped · {ebayActiveSummary.errorCount} errors
+                </div>
+              </div>
+            </div>
+          )}
+
+      {/* Log — shared across all tabs */}
       {logs.length > 0 && (
-        <div className="panel mb-16">
+        <div className="panel mt-16">
           <div className="panel-header"><span className="panel-title">Import log</span></div>
           <div style={{ padding:'12px 16px', maxHeight:300, overflowY:'auto', fontFamily:'monospace', fontSize:12 }}>
             {logs.map(log => (
@@ -461,19 +1020,6 @@ export default function Import() {
                 [{log.type.toUpperCase()}] {log.message}
               </div>
             ))}
-          </div>
-        </div>
-      )}
-
-      {/* Summary */}
-      {summary && (
-        <div className={`alert-item ${summary.errorCount === 0 ? 'success' : 'warning'}`}>
-          <span className="alert-icon">{summary.errorCount === 0 ? '✓' : '⚠️'}</span>
-          <div className="alert-content">
-            <div className="alert-title">Import complete</div>
-            <div className="alert-desc">
-              {summary.boxCount} new boxes · {summary.packCount} new packs · {summary.cardCount} new cards · {summary.skipped} skipped · {summary.errorCount} errors
-            </div>
           </div>
         </div>
       )}

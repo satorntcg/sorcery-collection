@@ -2,12 +2,13 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 
 const usd  = (n) => n != null ? `$${Number(n).toFixed(2)}` : '—'
+const fmtPnl = (n) => { if (n == null) return '—'; const v = Number(n); return `${v >= 0 ? '+$' : '-$'}${Math.abs(v).toFixed(2)}` }
 const date = (d) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'
 
 const BOX_TYPES = ['booster_box', 'prerelease_kit', 'single_booster', 'bundle', 'other']
 const SETS = ['Alpha', 'Beta', 'Arthurian Legends', 'Gothic', 'Other']
 
-const BLANK = { name: '',set_name: 'Gothic', box_type: 'booster_box', purchase_price: '', purchased_at: '', seller: '', notes: '' }
+const BLANK = { name: '', set_name: 'Gothic', box_type: 'booster_box', purchase_price: '', pack_count: '36', pack_msrp: '5', purchased_at: '', seller: '', notes: '' }
 
 export default function Boxes() {
   const [boxes, setBoxes]       = useState([])
@@ -15,7 +16,7 @@ export default function Boxes() {
   const [modal, setModal]       = useState(false)
   const [form, setForm]         = useState(BLANK)
   const [saving, setSaving]     = useState(false)
-  const [selected, setSelected] = useState(null)   // box id for drill-down
+  const [selected, setSelected] = useState(null)
   const [boxCards, setBoxCards] = useState([])
   const [cardsLoading, setCardsLoading] = useState(false)
 
@@ -31,29 +32,15 @@ export default function Boxes() {
 
   async function loadBoxCards(boxId) {
     setCardsLoading(true)
-
-    // Get all packs for this box, then all cards from those packs
-    const { data: packs } = await supabase
-      .from('packs')
-      .select('id')
-      .eq('box_id', boxId)
-
+    const { data: packs } = await supabase.from('packs').select('id').eq('box_id', boxId)
     const packIds = (packs ?? []).map(p => p.id)
     if (!packIds.length) { setBoxCards([]); setCardsLoading(false); return }
 
     const { data: packCards } = await supabase
       .from('pack_cards')
-      .select(`
-        quantity,
-        pack_id,
-        packs ( pack_number ),
-        cards (
-          id, name, rarity, condition, tcgplayer_id
-        )
-      `)
+      .select('quantity, pack_id, packs ( pack_number ), cards ( id, name, rarity, condition, tcgplayer_id )')
       .in('pack_id', packIds)
 
-    // Get latest prices
     const cardIds = (packCards ?? []).map(r => r.cards?.id).filter(Boolean)
     let prices = []
     if (cardIds.length) {
@@ -64,7 +51,6 @@ export default function Boxes() {
       prices = priceData ?? []
     }
     const priceMap = Object.fromEntries(prices.map(p => [p.card_id, p]))
-
     setBoxCards((packCards ?? []).map(row => ({
       ...row,
       pack_number: row.packs?.pack_number ?? null,
@@ -74,7 +60,6 @@ export default function Boxes() {
   }
 
   useEffect(() => { load() }, [])
-
   useEffect(() => {
     if (selected) loadBoxCards(selected)
     else setBoxCards([])
@@ -82,23 +67,26 @@ export default function Boxes() {
 
   const totalCost  = boxes.reduce((s, b) => s + Number(b.purchase_price || 0), 0)
   const totalValue = boxes.reduce((s, b) => s + Number(b.cards_market_value || 0), 0)
-  const totalPnl   = boxes.reduce((s, b) => s + Number(b.gross_pnl || 0), 0)
+  const totalPnl   = totalValue - totalCost
 
   const selectedBox = boxes.find(b => b.id === selected)
-
   const f = (field) => (e) => setForm(prev => ({ ...prev, [field]: e.target.value }))
 
   async function save() {
     setSaving(true)
-    await supabase.from('boxes').insert({
+    const { error } = await supabase.from('boxes').insert({
+      name:           form.name?.trim() || null,
       set_name:       form.set_name,
       box_type:       form.box_type,
       purchase_price: Number(form.purchase_price),
+      pack_count:     parseInt(form.pack_count) || 36,
+      pack_msrp:      parseFloat(form.pack_msrp) || 5,
       purchased_at:   form.purchased_at ? new Date(form.purchased_at).toISOString() : new Date().toISOString(),
       seller:         form.seller || null,
       notes:          form.notes || null,
     })
     setSaving(false)
+    if (error) { alert(`Save failed: ${error.message}`); return }
     setModal(false)
     setForm(BLANK)
     load()
@@ -133,8 +121,8 @@ export default function Boxes() {
         </div>
         <div className="metric-card">
           <div className="metric-label">Gross P&L</div>
-          <div className={`metric-value ${totalPnl >= 0 ? 'success' : 'danger'}`}>
-            {totalPnl >= 0 ? '+' : ''}{usd(totalPnl)}
+          <div className="metric-value" style={{ color: totalPnl >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+            {fmtPnl(totalPnl)}
           </div>
           <div className="metric-sub">unrealized</div>
         </div>
@@ -153,16 +141,23 @@ export default function Boxes() {
             </div>
           ) : (
             <div className="panel">
-              <table className="data-table">
+              <table className="data-table" style={{ tableLayout: 'fixed' }}>
+                <colgroup>
+                  <col style={{ width: '30%' }} />
+                  <col style={{ width: '14%' }} />
+                  <col style={{ width: '13%' }} />
+                  <col style={{ width: '13%' }} />
+                  <col style={{ width: '13%' }} />
+                  <col style={{ width: '17%' }} />
+                </colgroup>
                 <thead>
                   <tr>
                     <th>Box</th>
-                    <th>Type</th>
-                    <th className="text-right">Cost</th>
-                    <th className="text-right">Card value</th>
-                    <th className="text-right">P&L</th>
-                    <th className="text-right">Cards</th>
-                    <th></th>
+                    <th style={{ whiteSpace: 'nowrap' }}>Type</th>
+                    <th className="text-right" style={{ whiteSpace: 'nowrap' }}>Cost</th>
+                    <th className="text-right" style={{ whiteSpace: 'nowrap' }}>Card value</th>
+                    <th className="text-right" style={{ whiteSpace: 'nowrap' }}>P&L</th>
+                    <th className="text-right" style={{ whiteSpace: 'nowrap' }}>Cards</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -177,7 +172,9 @@ export default function Boxes() {
                       onClick={() => setSelected(selected === box.id ? null : box.id)}
                     >
                       <td>
-                        <div className="name-cell">{box.name ?? box.set_name}</div>
+                        <div className="name-cell" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {box.name ?? box.set_name}
+                        </div>
                         <div className="set-cell">{date(box.purchased_at)}</div>
                       </td>
                       <td className="text-muted" style={{ fontSize: 12 }}>
@@ -186,22 +183,22 @@ export default function Boxes() {
                       <td className="text-right">{usd(box.purchase_price)}</td>
                       <td className="text-right text-gold">{usd(box.cards_market_value)}</td>
                       <td className="text-right">
-                        <span className={box.gross_pnl >= 0 ? 'text-success' : 'text-danger'}>
-                          {box.gross_pnl >= 0 ? '+' : ''}{usd(box.gross_pnl)}
+                        <span style={{ color: Number(box.gross_pnl) >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+                          {fmtPnl(box.gross_pnl)}
                         </span>
                       </td>
-                      <td className="text-right">{box.distinct_cards_pulled ?? 0}</td>
                       <td>
-                        <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
-                          {!box.opened_at && (
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
+                          <span className="text-muted" style={{ fontSize: 13 }}>{box.distinct_cards_pulled ?? 0}</span>
+                          {!box.opened_at && !box.packs_opened ? (
                             <button
                               className="btn btn-ghost btn-sm"
+                              style={{ whiteSpace: 'nowrap', fontSize: 11 }}
                               onClick={e => { e.stopPropagation(); markOpened(box.id) }}
                             >
                               Mark opened
                             </button>
-                          )}
-                          {box.opened_at && (
+                          ) : (
                             <span className="badge badge-ok" style={{ fontSize: 10 }}>Opened</span>
                           )}
                         </div>
@@ -220,7 +217,7 @@ export default function Boxes() {
             <div className="panel">
               <div className="panel-header">
                 <div>
-                  <div className="panel-title">{selectedBox?.set_name} — Cards pulled</div>
+                  <div className="panel-title">{selectedBox?.name ?? selectedBox?.set_name} — Cards pulled</div>
                   <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
                     {selectedBox?.box_type?.replace(/_/g, ' ')} · {usd(selectedBox?.purchase_price)} cost
                   </div>
@@ -231,13 +228,13 @@ export default function Boxes() {
               {/* Box P&L summary */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', borderBottom: '1px solid var(--border)' }}>
                 {[
-                  ['Cost', usd(selectedBox?.purchase_price), ''],
-                  ['Card value', usd(selectedBox?.cards_market_value), 'gold'],
-                  ['P&L', `${selectedBox?.gross_pnl >= 0 ? '+' : ''}${usd(selectedBox?.gross_pnl)}`, selectedBox?.gross_pnl >= 0 ? 'success' : 'danger'],
-                ].map(([label, val, cls]) => (
+                  ['Cost',       usd(selectedBox?.purchase_price),    null],
+                  ['Card value', usd(selectedBox?.cards_market_value), 'var(--gold-light)'],
+                  ['P&L',        fmtPnl(selectedBox?.gross_pnl),       Number(selectedBox?.gross_pnl) >= 0 ? 'var(--success)' : 'var(--danger)'],
+                ].map(([label, val, color]) => (
                   <div key={label} style={{ padding: '12px 16px', borderRight: '1px solid var(--border)' }}>
                     <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-muted)', marginBottom: 4 }}>{label}</div>
-                    <div className={`metric-value ${cls}`} style={{ fontSize: 18 }}>{val}</div>
+                    <div className="metric-value" style={{ fontSize: 18, color: color ?? 'var(--text-primary)' }}>{val}</div>
                   </div>
                 ))}
               </div>
@@ -254,7 +251,15 @@ export default function Boxes() {
                   </div>
                 </div>
               ) : (
-                <table className="data-table">
+                <table className="data-table" style={{ tableLayout: 'fixed' }}>
+                  <colgroup>
+                    <col style={{ width: '40%' }} />
+                    <col style={{ width: '10%' }} />
+                    <col style={{ width: '18%' }} />
+                    <col style={{ width: '8%' }} />
+                    <col style={{ width: '12%' }} />
+                    <col style={{ width: '12%' }} />
+                  </colgroup>
                   <thead>
                     <tr>
                       <th>Card</th>
@@ -274,13 +279,9 @@ export default function Boxes() {
                         const value    = mktPrice ? mktPrice * row.quantity : null
                         return (
                           <tr key={i}>
-                            <td className="name-cell">{card?.name}</td>
-                            <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                              #{row.pack_number ?? '—'}
-                            </td>
-                            <td>
-                              <span className={`badge badge-${card?.rarity}`}>{card?.rarity}</span>
-                            </td>
+                            <td className="name-cell" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{card?.name}</td>
+                            <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>#{row.pack_number ?? '—'}</td>
+                            <td><span className={`badge badge-${card?.rarity}`}>{card?.rarity}</span></td>
                             <td className="text-right">{row.quantity}</td>
                             <td className="text-right">{usd(mktPrice)}</td>
                             <td className="text-right text-gold">{usd(value)}</td>
@@ -290,11 +291,11 @@ export default function Boxes() {
                   </tbody>
                   <tfoot>
                     <tr>
-                      <td colSpan={4} style={{ padding: '10px 14px', fontSize: 11, color: 'var(--text-muted)', borderTop: '1px solid var(--border)' }}>
+                      <td colSpan={5} style={{ padding: '10px 14px', fontSize: 11, color: 'var(--text-muted)', borderTop: '1px solid var(--border)' }}>
                         Total card value
                       </td>
                       <td className="text-right text-gold" style={{ padding: '10px 14px', fontWeight: 500, borderTop: '1px solid var(--border)' }}>
-                        {usd(boxCards.reduce((s, r) => s + (r.price?.tcgplayer_market ?? 0) * r.quantity, 0))}
+{usd(boxCards.reduce((s, r) => s + (r.price?.tcgplayer_market ?? 0) * r.quantity, 0) + 1.00)}
                       </td>
                     </tr>
                   </tfoot>
@@ -316,9 +317,8 @@ export default function Boxes() {
             <div className="modal-body">
               <div className="form-row">
                 <div className="form-group">
-                 <label className="form-label">Box name</label>
-                 <input className="form-input" value={form.name ?? ''} 
-                  onChange={f('name')} placeholder="e.g. Gothic Box 1" />
+                  <label className="form-label">Box name</label>
+                  <input className="form-input" value={form.name ?? ''} onChange={f('name')} placeholder="e.g. Gothic Box 1" />
                 </div>
                 <div className="form-group">
                   <label className="form-label">Set</label>
@@ -326,26 +326,38 @@ export default function Boxes() {
                     {SETS.map(s => <option key={s}>{s}</option>)}
                   </select>
                 </div>
+              </div>
+              <div className="form-row">
                 <div className="form-group">
                   <label className="form-label">Box type</label>
                   <select className="form-select" value={form.box_type} onChange={f('box_type')}>
                     {BOX_TYPES.map(t => <option key={t} value={t}>{t.replace(/_/g, ' ')}</option>)}
                   </select>
                 </div>
+                <div className="form-group">
+                  <label className="form-label">Purchase price ($) *</label>
+                  <input className="form-input" type="number" step="0.01" value={form.purchase_price} onChange={f('purchase_price')} placeholder="e.g. 180.00" />
+                </div>
               </div>
               <div className="form-row">
                 <div className="form-group">
-                  <label className="form-label">Purchase price ($) *</label>
-                  <input className="form-input" type="number" step="0.01" value={form.purchase_price} onChange={f('purchase_price')} placeholder="e.g. 180.00 for 36 packs" />
+                  <label className="form-label">Pack count</label>
+                  <input className="form-input" type="number" value={form.pack_count} onChange={f('pack_count')} placeholder="36" />
                 </div>
+                <div className="form-group">
+                  <label className="form-label">Pack MSRP ($)</label>
+                  <input className="form-input" type="number" step="0.01" value={form.pack_msrp} onChange={f('pack_msrp')} placeholder="5.00" />
+                </div>
+              </div>
+              <div className="form-row">
                 <div className="form-group">
                   <label className="form-label">Purchase date</label>
                   <input className="form-input" type="date" value={form.purchased_at} onChange={f('purchased_at')} />
                 </div>
-              </div>
-              <div className="form-group">
-                <label className="form-label">Seller / source</label>
-                <input className="form-input" value={form.seller} onChange={f('seller')} placeholder="e.g. local game store" />
+                <div className="form-group">
+                  <label className="form-label">Seller / source</label>
+                  <input className="form-input" value={form.seller} onChange={f('seller')} placeholder="e.g. local game store" />
+                </div>
               </div>
               <div className="form-group">
                 <label className="form-label">Notes</label>

@@ -16,7 +16,7 @@ function SummaryCard({ opening, packs }) {
 
   const packBreakdown = packs.map(pack => ({
     number: pack.pack_number,
-    value:  pack.cards.reduce((s, c) => s + (c.tcgplayer_market ?? 0) * c.quantity, 0),
+    value:  pack.cards.reduce((s, c) => s + (c.tcgplayer_market ?? 0) * c.quantity, 0) + 1.00,
     cards:  pack.cards,
   }))
 
@@ -502,7 +502,7 @@ export default function YouTube() {
                     </span>
                   </div>
                   {packData.map(pack => {
-                    const packValue = pack.cards.reduce((s, c) => s + (c.tcgplayer_market ?? 0) * c.quantity, 0)
+                    const packValue = pack.cards.reduce((s, c) => s + (c.tcgplayer_market ?? 0) * c.quantity, 0) + 1.00
                     const packCost  = openingMeta?.pack_msrp ?? 5
                     const isProfit  = packValue >= packCost
                     return (

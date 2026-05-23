@@ -5,10 +5,10 @@ const usd = (n) => n != null ? `$${Number(n).toFixed(2)}` : '—'
 
 const RARITIES   = ['ordinary', 'exceptional', 'elite', 'unique']
 const CONDITIONS = ['near_mint', 'lightly_played', 'moderately_played', 'heavily_played', 'damaged']
-const SETS       = ['Alpha', 'Beta', 'Arthurian Legends', 'Other']
+const SETS       = ['Alpha', 'Beta', 'Arthurian Legends', 'Gothic','Other']
 
 const BLANK = {
-  name: '', set_name: 'Alpha', set_code: '', rarity: 'elite',
+  name: '', set_name: 'Gothic', set_code: '', rarity: 'elite',
   condition: 'near_mint', foil: false, quantity_owned: 1,
   cost_basis: '', image_url: '', tcgplayer_id: '', notes: '',
 }
@@ -43,36 +43,51 @@ export default function Inventory() {
   function openEdit(card) {
     setForm({
       ...card,
-      cost_basis: card.cost_basis ?? '',
-      image_url:  card.image_url  ?? '',
+      id:          card.card_id ?? card.id,
+      cost_basis:  card.cost_basis ?? '',
+      image_url:   card.image_url  ?? '',
       tcgplayer_id: card.tcgplayer_id ?? '',
-      notes: card.notes ?? '',
+      notes:       card.notes ?? '',
     })
     setModal('edit')
   }
   function closeModal() { setModal(null); setForm(BLANK) }
 
-  async function save() {
+async function save() {
     setSaving(true)
     const payload = {
-      name:           form.name,
+      name:           form.name?.trim(),
       set_name:       form.set_name,
-      set_code:       form.set_code || null,
+      set_code:       form.set_code?.trim() || null,
       rarity:         form.rarity,
       condition:      form.condition,
-      foil:           form.foil,
-      quantity_owned: Number(form.quantity_owned),
-      cost_basis:     form.cost_basis !== '' ? Number(form.cost_basis) : null,
-      image_url:      form.image_url  || null,
-      tcgplayer_id:   form.tcgplayer_id || null,
-      notes:          form.notes || null,
+      foil:           Boolean(form.foil),
+      quantity_owned: parseInt(form.quantity_owned) || 0,
+      image_url:      form.image_url?.trim()    || null,
+      tcgplayer_id:   form.tcgplayer_id?.trim() || null,
+      notes:          form.notes?.trim()         || null,
     }
+    // Include cost_basis for manually added cards
+    if (form.cost_basis !== '' && form.cost_basis != null) {
+      payload.cost_basis = parseFloat(form.cost_basis) || null
+    }
+
+    let error
     if (modal === 'add') {
-      await supabase.from('cards').insert(payload)
+      const res = await supabase.from('cards').insert(payload)
+      error = res.error
     } else {
-      await supabase.from('cards').update(payload).eq('id', form.id)
+      const res = await supabase.from('cards').update(payload).eq('id', form.id)
+      error = res.error
     }
+
     setSaving(false)
+
+    if (error) {
+      alert(`Save failed: ${error.message}`)
+      return
+    }
+
     closeModal()
     load()
   }
@@ -135,7 +150,7 @@ export default function Inventory() {
             </thead>
             <tbody>
               {filtered.map(card => (
-                <tr key={card.id}>
+                <tr key={card.card_id ?? card.id}>
                   <td>
                     <div className="name-cell">{card.name}</div>
                     <div className="set-cell">{card.set_name}{card.foil ? ' · Foil' : ''}</div>
@@ -159,7 +174,7 @@ export default function Inventory() {
                   <td>
                     <div className="flex gap-8" style={{ justifyContent: 'flex-end' }}>
                       <button className="btn btn-ghost btn-sm" onClick={() => openEdit(card)}>Edit</button>
-                      <button className="btn btn-danger btn-sm" onClick={() => setDeleteId(card.id)}>Delete</button>
+                      <button className="btn btn-danger btn-sm" onClick={() => setDeleteId(card.card_id ?? card.id)}>Delete</button>
                     </div>
                   </td>
                 </tr>
@@ -214,10 +229,22 @@ export default function Inventory() {
                   <input className="form-input" type="number" min="0" value={form.quantity_owned} onChange={f('quantity_owned')} />
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Cost basis ($)</label>
-                  <input className="form-input" type="number" step="0.01" min="0" value={form.cost_basis} onChange={f('cost_basis')} placeholder="Total paid for all copies" />
+              {modal === 'edit' ? (
+                <div className="form-group">
+                  <label className="form-label">Cost basis</label>
+                  <div style={{ padding: '9px 12px', background: 'var(--bg-void)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', fontSize: 13, color: 'var(--text-muted)' }}>
+                    {form.cost_basis ? `$${Number(form.cost_basis).toFixed(4)} — auto-calculated from box` : 'Auto-calculated from box purchase price'}
+                  </div>
                 </div>
+              ) : (
+                <div className="form-group">
+                  <label className="form-label">Cost basis ($) <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(optional)</span></label>
+                  <input className="form-input" type="number" step="0.0001" min="0" value={form.cost_basis} onChange={f('cost_basis')} placeholder="e.g. 0.33" />
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>For cards not linked to a box. Leave blank to skip.</div>
+                </div>
+              )}
               </div>
+            </div>
               <div className="form-group">
                 <label className="form-label">TCGPlayer ID (optional)</label>
                 <input className="form-input" value={form.tcgplayer_id} onChange={f('tcgplayer_id')} placeholder="Product ID from TCGPlayer URL" />
