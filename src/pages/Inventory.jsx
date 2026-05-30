@@ -21,6 +21,11 @@ export default function Inventory() {
   const [form, setForm]         = useState(BLANK)
   const [saving, setSaving]     = useState(false)
   const [deleteId, setDeleteId] = useState(null)
+  const [boxes, setBoxes]       = useState([])
+  const [packs, setPacks]       = useState([])
+  const [selBoxId, setSelBoxId] = useState('')
+  const [selPackId, setSelPackId] = useState('')
+  const [newPackNumber, setNewPackNumber] = useState(1)
 
   async function load() {
     setLoading(true)
@@ -34,12 +39,25 @@ export default function Inventory() {
 
   useEffect(() => { load() }, [])
 
+  async function fetchBoxes() {
+    const { data } = await supabase.from('boxes').select('id, name, purchase_price, pack_count').order('name')
+    setBoxes(data ?? [])
+  }
+
+  async function fetchPacks(boxId) {
+    if (!boxId) { setPacks([]); setSelPackId(''); return }
+    const { data } = await supabase.from('packs').select('id, pack_number').eq('box_id', boxId).order('pack_number')
+    setPacks(data ?? [])
+    setSelPackId('')
+    setNewPackNumber(1)
+  }
+
   const filtered = cards.filter(c =>
     c.name?.toLowerCase().includes(search.toLowerCase()) ||
     c.set_name?.toLowerCase().includes(search.toLowerCase())
   )
 
-  function openAdd() { setForm(BLANK); setModal('add') }
+  function openAdd() { setForm(BLANK); setSelBoxId(''); setSelPackId(''); setNewPackNumber(1); fetchBoxes(); setModal('add') }
   function openEdit(card) {
     setForm({
       ...card,
@@ -74,8 +92,24 @@ async function save() {
 
     let error
     if (modal === 'add') {
-      const res = await supabase.from('cards').insert(payload)
+      const res = await supabase.from('cards').insert(payload).select('id').single()
       error = res.error
+      // Link to pack
+      if (!error && res.data?.id) {
+        let packId = selPackId
+        if (!packId && selBoxId) {
+          // No existing pack selected — create a new pack for this box
+          const { data: newPack } = await supabase
+            .from('packs')
+            .insert({ box_id: selBoxId, pack_number: newPackNumber })
+            .select('id')
+            .single()
+          packId = newPack?.id
+        }
+        if (packId) {
+          await supabase.from('pack_cards').insert({ pack_id: packId, card_id: res.data.id })
+        }
+      }
     } else {
       const res = await supabase.from('cards').update(payload).eq('id', form.id)
       error = res.error
@@ -263,6 +297,42 @@ async function save() {
                   <span className="form-label" style={{ margin: 0 }}>Foil</span>
                 </label>
               </div>
+              {modal === 'add' && (
+                <div className="form-row">
+                  <div className="form-group">
+                    <label className="form-label">Link to box <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(optional)</span></label>
+                    <select className="form-select" value={selBoxId} onChange={e => { setSelBoxId(e.target.value); fetchPacks(e.target.value) }}>
+                      <option value="">— No box —</option>
+                      {boxes.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Link to pack <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(optional)</span></label>
+                    {!selBoxId ? (
+                      <select className="form-select" disabled>
+                        <option>— Select a box first —</option>
+                      </select>
+                    ) : packs.length > 0 ? (
+                      <select className="form-select" value={selPackId} onChange={e => setSelPackId(e.target.value)}>
+                        <option value="">— Select pack —</option>
+                        {packs.map(p => <option key={p.id} value={p.id}>Pack #{p.pack_number}</option>)}
+                      </select>
+                    ) : (
+                      <div>
+                        <input
+                          className="form-input"
+                          type="number" min="1" max="36"
+                          value={newPackNumber}
+                          onChange={e => setNewPackNumber(parseInt(e.target.value) || 1)}
+                        />
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+                          No packs exist yet — a new pack #{newPackNumber} will be created in this box
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
             <div className="modal-footer">
               <button className="btn" onClick={closeModal}>Cancel</button>
