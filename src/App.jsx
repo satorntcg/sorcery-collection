@@ -13,6 +13,7 @@ import Import from './pages/Import'
 import Login from './pages/Login'
 import YouTube from './pages/YouTube'
 import ListingSuggestions from './pages/ListingSuggestions'
+import RulesChat from './pages/RulesChat'
 
 export default function App() {
   const [session, setSession]       = useState(undefined)
@@ -65,6 +66,7 @@ export default function App() {
           <Route path="/settings"  element={<Settings />} />
           <Route path="/suggestions" element={<ListingSuggestions />} />
           <Route path="*"          element={<Navigate to="/" />} />
+          <Route path="/rules" element={<RulesChat />} />
         </Routes>
       </main>
     </div>

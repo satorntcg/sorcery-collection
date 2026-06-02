@@ -5,7 +5,7 @@ const usd = (n) => n != null ? `$${Number(n).toFixed(2)}` : '—'
 
 const RARITIES   = ['ordinary', 'exceptional', 'elite', 'unique']
 const CONDITIONS = ['near_mint', 'lightly_played', 'moderately_played', 'heavily_played', 'damaged']
-const SETS       = ['Alpha', 'Beta', 'Arthurian Legends', 'Gothic','Other']
+const SETS       = ['Alpha', 'Beta', 'Arthurian Legends', 'Gothic', 'Other']
 
 const BLANK = {
   name: '', set_name: 'Gothic', set_code: '', rarity: 'elite',
@@ -13,19 +13,95 @@ const BLANK = {
   cost_basis: '', image_url: '', tcgplayer_id: '', notes: '',
 }
 
+const CONDITION_MAP = {
+  near_mint:         (foil) => foil ? 'Near Mint Foil'         : 'Near Mint',
+  lightly_played:    (foil) => foil ? 'Lightly Played Foil'    : 'Lightly Played',
+  moderately_played: (foil) => foil ? 'Moderately Played Foil' : 'Moderately Played',
+  heavily_played:    (foil) => foil ? 'Heavily Played Foil'    : 'Heavily Played',
+  damaged:           (foil) => foil ? 'Damaged Foil'           : 'Damaged',
+}
+
+function exportTCGPlayerCSV(cards) {
+  const withId  = cards.filter(c => c.tcgplayer_id)
+  const missing = cards.filter(c => !c.tcgplayer_id)
+
+  const headers = [
+    'TCGplayer Id',
+    'Product Line',
+    'Set Name',
+    'Product Name',
+    'Title',
+    'Number',
+    'Rarity',
+    'Condition',
+    'TCG Market Price',
+    'TCG Direct Low',
+    'TCG Low w/ Shipping',
+    'TCG Low Price',
+    'Total Quantity',
+    'Add to Quantity',
+    'TCG Marketplace Price',
+  ]
+
+  const rows = withId.map(c => {
+    const condLabel = (CONDITION_MAP[c.condition] ?? (() => c.condition ?? ''))(Boolean(c.foil))
+    const price = c.tcgplayer_market ? Number(c.tcgplayer_market).toFixed(2) : '0.01'
+    return [
+      c.tcgplayer_id,
+      'Sorcery',
+      c.set_name ?? '',
+      c.name ?? '',
+      '',
+      '',
+      c.rarity ?? '',
+      condLabel,
+      price,
+      '',
+      '',
+      '',
+      c.quantity_owned ?? 0,
+      c.quantity_owned ?? 0,
+      price,
+    ]
+  })
+
+  const escape = v => {
+    const s = String(v ?? '')
+    return s.includes(',') || s.includes('"') || s.includes('\n')
+      ? `"${s.replace(/"/g, '""')}"` : s
+  }
+
+  const csv = [headers, ...rows].map(r => r.map(escape).join(',')).join('\n')
+  const blob = new Blob([csv], { type: 'text/csv' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `tcgplayer-import-${new Date().toISOString().slice(0, 10)}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+
+  return {
+    exported: withId.length,
+    skipped: missing.length,
+    skippedNames: missing.map(c => c.name),
+  }
+}
+
 export default function Inventory() {
-  const [cards, setCards]       = useState([])
-  const [loading, setLoading]   = useState(true)
-  const [search, setSearch]     = useState('')
-  const [modal, setModal]       = useState(null)   // null | 'add' | 'edit'
-  const [form, setForm]         = useState(BLANK)
-  const [saving, setSaving]     = useState(false)
-  const [deleteId, setDeleteId] = useState(null)
-  const [boxes, setBoxes]       = useState([])
-  const [packs, setPacks]       = useState([])
-  const [selBoxId, setSelBoxId] = useState('')
-  const [selPackId, setSelPackId] = useState('')
+  const [cards, setCards]           = useState([])
+  const [loading, setLoading]       = useState(true)
+  const [search, setSearch]         = useState('')
+  const [modal, setModal]           = useState(null)   // null | 'add' | 'edit'
+  const [form, setForm]             = useState(BLANK)
+  const [saving, setSaving]         = useState(false)
+  const [deleteId, setDeleteId]     = useState(null)
+  const [boxes, setBoxes]           = useState([])
+  const [packs, setPacks]           = useState([])
+  const [selBoxId, setSelBoxId]     = useState('')
+  const [selPackId, setSelPackId]   = useState('')
   const [newPackNumber, setNewPackNumber] = useState(1)
+  const [inStockOnly, setInStockOnly]    = useState(false)
+  const [exportResult, setExportResult]  = useState(null)
 
   async function load() {
     setLoading(true)
@@ -52,26 +128,37 @@ export default function Inventory() {
     setNewPackNumber(1)
   }
 
-  const filtered = cards.filter(c =>
-    c.name?.toLowerCase().includes(search.toLowerCase()) ||
-    c.set_name?.toLowerCase().includes(search.toLowerCase())
-  )
+  const filtered = cards.filter(c => {
+    const matchSearch = c.name?.toLowerCase().includes(search.toLowerCase()) ||
+      c.set_name?.toLowerCase().includes(search.toLowerCase())
+    const matchStock = !inStockOnly || (c.quantity_owned ?? 0) > 0
+    return matchSearch && matchStock
+  })
 
-  function openAdd() { setForm(BLANK); setSelBoxId(''); setSelPackId(''); setNewPackNumber(1); fetchBoxes(); setModal('add') }
+  function openAdd() {
+    setForm(BLANK)
+    setSelBoxId('')
+    setSelPackId('')
+    setNewPackNumber(1)
+    fetchBoxes()
+    setModal('add')
+  }
+
   function openEdit(card) {
     setForm({
       ...card,
-      id:          card.card_id ?? card.id,
-      cost_basis:  card.cost_basis ?? '',
-      image_url:   card.image_url  ?? '',
+      id:           card.card_id ?? card.id,
+      cost_basis:   card.cost_basis ?? '',
+      image_url:    card.image_url  ?? '',
       tcgplayer_id: card.tcgplayer_id ?? '',
-      notes:       card.notes ?? '',
+      notes:        card.notes ?? '',
     })
     setModal('edit')
   }
+
   function closeModal() { setModal(null); setForm(BLANK) }
 
-async function save() {
+  async function save() {
     setSaving(true)
     const payload = {
       name:           form.name?.trim(),
@@ -85,7 +172,6 @@ async function save() {
       tcgplayer_id:   form.tcgplayer_id?.trim() || null,
       notes:          form.notes?.trim()         || null,
     }
-    // Include cost_basis for manually added cards
     if (form.cost_basis !== '' && form.cost_basis != null) {
       payload.cost_basis = parseFloat(form.cost_basis) || null
     }
@@ -94,11 +180,9 @@ async function save() {
     if (modal === 'add') {
       const res = await supabase.from('cards').insert(payload).select('id').single()
       error = res.error
-      // Link to pack
       if (!error && res.data?.id) {
         let packId = selPackId
         if (!packId && selBoxId) {
-          // No existing pack selected — create a new pack for this box
           const { data: newPack } = await supabase
             .from('packs')
             .insert({ box_id: selBoxId, pack_number: newPackNumber })
@@ -144,11 +228,20 @@ async function save() {
           <h1 className="page-title">Inventory</h1>
           <p className="page-subtitle">{cards.length} cards tracked</p>
         </div>
-        <button className="btn btn-primary" onClick={openAdd}>+ Add card</button>
+        <div className="flex gap-8">
+          <button
+            className="btn btn-ghost"
+            onClick={() => setExportResult(exportTCGPlayerCSV(cards))}
+            disabled={loading || cards.length === 0}
+          >
+            ↓ Export to TCGPlayer
+          </button>
+          <button className="btn btn-primary" onClick={openAdd}>+ Add card</button>
+        </div>
       </div>
 
-      {/* Search */}
-      <div className="mb-16">
+      {/* Search + filters */}
+      <div className="mb-16" style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
         <input
           className="form-input"
           style={{ maxWidth: 320 }}
@@ -156,6 +249,12 @@ async function save() {
           value={search}
           onChange={e => setSearch(e.target.value)}
         />
+        <button
+          className={`btn btn-sm ${inStockOnly ? 'btn-primary' : 'btn-ghost'}`}
+          onClick={() => setInStockOnly(v => !v)}
+        >
+          {inStockOnly ? '✓ In stock only' : 'In stock only'}
+        </button>
       </div>
 
       {loading ? (
@@ -263,22 +362,22 @@ async function save() {
                   <input className="form-input" type="number" min="0" value={form.quantity_owned} onChange={f('quantity_owned')} />
                 </div>
                 <div className="form-group">
-              {modal === 'edit' ? (
-                <div className="form-group">
-                  <label className="form-label">Cost basis</label>
-                  <div style={{ padding: '9px 12px', background: 'var(--bg-void)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', fontSize: 13, color: 'var(--text-muted)' }}>
-                    {form.cost_basis ? `$${Number(form.cost_basis).toFixed(4)} — auto-calculated from box` : 'Auto-calculated from box purchase price'}
-                  </div>
+                  {modal === 'edit' ? (
+                    <div className="form-group">
+                      <label className="form-label">Cost basis</label>
+                      <div style={{ padding: '9px 12px', background: 'var(--bg-void)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', fontSize: 13, color: 'var(--text-muted)' }}>
+                        {form.cost_basis ? `$${Number(form.cost_basis).toFixed(4)} — auto-calculated from box` : 'Auto-calculated from box purchase price'}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="form-group">
+                      <label className="form-label">Cost basis ($) <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(optional)</span></label>
+                      <input className="form-input" type="number" step="0.0001" min="0" value={form.cost_basis} onChange={f('cost_basis')} placeholder="e.g. 0.33" />
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>For cards not linked to a box. Leave blank to skip.</div>
+                    </div>
+                  )}
                 </div>
-              ) : (
-                <div className="form-group">
-                  <label className="form-label">Cost basis ($) <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(optional)</span></label>
-                  <input className="form-input" type="number" step="0.0001" min="0" value={form.cost_basis} onChange={f('cost_basis')} placeholder="e.g. 0.33" />
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>For cards not linked to a box. Leave blank to skip.</div>
-                </div>
-              )}
               </div>
-            </div>
               <div className="form-group">
                 <label className="form-label">TCGPlayer ID (optional)</label>
                 <input className="form-input" value={form.tcgplayer_id} onChange={f('tcgplayer_id')} placeholder="Product ID from TCGPlayer URL" />
@@ -359,6 +458,47 @@ async function save() {
             <div className="modal-footer">
               <button className="btn" onClick={() => setDeleteId(null)}>Cancel</button>
               <button className="btn btn-danger" onClick={confirmDelete}>Delete</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TCGPlayer export result modal */}
+      {exportResult && (
+        <div className="modal-overlay" onClick={() => setExportResult(null)}>
+          <div className="modal" style={{ maxWidth: 420 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <span className="modal-title">TCGPlayer CSV Export</span>
+              <button className="btn btn-ghost btn-sm" onClick={() => setExportResult(null)}>✕</button>
+            </div>
+            <div className="modal-body">
+              <div className="alert-item success" style={{ marginBottom: 12 }}>
+                <span className="alert-icon">✓</span>
+                <div className="alert-content">
+                  <div className="alert-title">{exportResult.exported} card{exportResult.exported !== 1 ? 's' : ''} exported</div>
+                  <div className="alert-desc">
+                    Upload via TCGPlayer Seller Portal → Pricing tab → Import to Staged
+                  </div>
+                </div>
+              </div>
+              {exportResult.skipped > 0 && (
+                <div className="alert-item warning">
+                  <span className="alert-icon">⚠️</span>
+                  <div className="alert-content">
+                    <div className="alert-title">{exportResult.skipped} card{exportResult.skipped !== 1 ? 's' : ''} skipped — no TCGPlayer ID</div>
+                    <div className="alert-desc" style={{ fontSize: 11, marginTop: 4 }}>
+                      {exportResult.skippedNames.slice(0, 8).join(', ')}
+                      {exportResult.skippedNames.length > 8 ? ` …and ${exportResult.skippedNames.length - 8} more` : ''}
+                    </div>
+                  </div>
+                </div>
+              )}
+              <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 12 }}>
+                Prices are pre-filled from TCGPlayer market data. Review and adjust in Staged Inventory before going live.
+              </p>
+            </div>
+            <div className="modal-footer">
+              <button className="btn btn-primary" onClick={() => setExportResult(null)}>Done</button>
             </div>
           </div>
         </div>

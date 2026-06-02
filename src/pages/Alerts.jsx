@@ -45,10 +45,9 @@ export default function Alerts({ onDismiss }) {
       if (!ebayByCard[l.card_id]) ebayByCard[l.card_id] = { listing_id: l.id, ebay_url: l.ebay_url }
     }
 
-    const alertsWithLinks = (alertRes.data ?? []).map(a => ({
-      ...a,
-      ...(ebayByCard[a.card_id] ?? {}),
-    }))
+    const alertsWithLinks = (alertRes.data ?? [])
+      .map(a => ({ ...a, ...(ebayByCard[a.card_id] ?? {}) }))
+      .filter(a => (a.new_price ?? 0) >= 1)
 
     setAlerts(alertsWithLinks)
     setGainers(gainerRes.data ?? [])

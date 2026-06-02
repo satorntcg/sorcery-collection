@@ -26,13 +26,12 @@ export default function Market() {
   const [runResult, setRunResult]     = useState(null)
   const [loading, setLoading]         = useState(true)
   const [lastChecked, setLastChecked] = useState(null)
-  const [search, setSearch]           = useState('')
 
   useEffect(() => {
     async function load() {
       const { data } = await supabase
         .from('v_latest_prices')
-        .select('card_id, name, set_name, rarity, foil, tcgplayer_market, tcgplayer_low, ebay_sold_avg, ebay_sold_low, ebay_sold_high, ebay_sold_count, checked_at')
+        .select('card_id, name, set_name, rarity, foil, tcgplayer_market, tcgplayer_low, ebay_sold_avg, ebay_sold_low, ebay_sold_high, ebay_sold_count, checked_at, tcgplayer_id')
         .order('name', { ascending: true })
       setCards(data ?? [])
       // Most recent checked_at across all cards = last global refresh
@@ -85,10 +84,7 @@ export default function Market() {
     setRunning(false)
   }
 
-  const selectedCard  = cards.find(c => c.card_id === selected)
-  const filteredCards = search.trim()
-    ? cards.filter(c => c.name?.toLowerCase().includes(search.toLowerCase()))
-    : cards
+  const selectedCard = cards.find(c => c.card_id === selected)
 
   return (
     <div className="page">
@@ -138,22 +134,11 @@ export default function Market() {
               </span>
             )}
           </div>
-          <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>
-            <input
-              className="form-input"
-              style={{ fontSize: 12, padding: '6px 10px' }}
-              placeholder="Search cards…"
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-            />
-          </div>
           {loading ? (
             <div className="loading" style={{ padding: 24 }}>Loading…</div>
           ) : cards.length === 0 ? (
             <div className="empty-state" style={{ padding: 24 }}>No price data yet</div>
-          ) : filteredCards.length === 0 ? (
-            <div className="empty-state" style={{ padding: 24 }}>No cards match your search.</div>
-          ) : filteredCards.map(c => (
+          ) : cards.map(c => (
             <div
               key={c.card_id}
               onClick={() => setSelected(c.card_id)}
@@ -203,21 +188,54 @@ export default function Market() {
                   </div>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, borderTop: '1px solid var(--border)' }}>
-                  {[
-                    ['TCGPlayer market', usd(selectedCard?.tcgplayer_market)],
-                    ['TCGPlayer low',    usd(selectedCard?.tcgplayer_low)],
-                    ['eBay sold avg',    usd(selectedCard?.ebay_sold_avg)],
-                    ['eBay sold range',  selectedCard?.ebay_sold_low
-                      ? `${usd(selectedCard.ebay_sold_low)} – ${usd(selectedCard.ebay_sold_high)}`
-                      : '—'],
-                  ].map(([label, val]) => (
-                    <div key={label} style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)' }}>
-                      <div style={{ fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 4 }}>
-                        {label}
-                      </div>
-                      <div style={{ fontSize: 18, fontWeight: 300, color: 'var(--gold-light)' }}>{val}</div>
+                  <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)' }}>
+                    <div style={{ fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span>TCGPlayer market</span>
+                      {selectedCard?.tcgplayer_id && (
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <a href={`https://www.tcgplayer.com/product/${selectedCard.tcgplayer_id}`} target="_blank" rel="noreferrer" style={{ fontSize: 10, color: 'var(--gold)', textDecoration: 'none', borderBottom: '1px dashed var(--gold)' }}>
+                            Listings ↗
+                          </a>
+                          <a href={`https://www.tcgplayer.com/search/sorcery-contested-realm/product?productLineName=sorcery-contested-realm&q=${encodeURIComponent(selectedCard?.name)}&view=grid`} target="_blank" rel="noreferrer" style={{ fontSize: 10, color: 'var(--gold)', textDecoration: 'none', borderBottom: '1px dashed var(--gold)' }}>
+                            Price history ↗
+                          </a>
+                        </div>
+                      )}
                     </div>
-                  ))}
+                    <div style={{ fontSize: 18, fontWeight: 300, color: 'var(--gold-light)' }}>{usd(selectedCard?.tcgplayer_market)}</div>
+                  </div>
+                  <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)' }}>
+                    <div style={{ fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 4 }}>TCGPlayer low</div>
+                    <div style={{ fontSize: 18, fontWeight: 300, color: 'var(--gold-light)' }}>{usd(selectedCard?.tcgplayer_low)}</div>
+                  </div>
+                  <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)' }}>
+                    <div style={{ fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span>eBay sold avg</span>
+                      <a
+                        href={`https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(`${selectedCard?.name}${selectedCard?.foil ? ' foil' : ' non-foil'} Sorcery TCG`)}&_sop=13&LH_Sold=1&LH_Complete=1`}
+                        target="_blank" rel="noreferrer"
+                        style={{ fontSize: 10, color: 'var(--text-secondary)', textDecoration: 'none', borderBottom: '1px dashed var(--border-mid)' }}
+                      >
+                        eBay sold ↗
+                      </a>
+                    </div>
+                    <div style={{ fontSize: 18, fontWeight: 300, color: 'var(--gold-light)' }}>{usd(selectedCard?.ebay_sold_avg)}</div>
+                  </div>
+                  <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)' }}>
+                    <div style={{ fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span>eBay sold range</span>
+                      <a
+                        href={`https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(`${selectedCard?.name}${selectedCard?.foil ? ' foil' : ' non-foil'} Sorcery TCG`)}&_sop=15&LH_Sold=1&LH_Complete=1`}
+                        target="_blank" rel="noreferrer"
+                        style={{ fontSize: 10, color: 'var(--text-secondary)', textDecoration: 'none', borderBottom: '1px dashed var(--border-mid)' }}
+                      >
+                        eBay active ↗
+                      </a>
+                    </div>
+                    <div style={{ fontSize: 18, fontWeight: 300, color: 'var(--gold-light)' }}>
+                      {selectedCard?.ebay_sold_low ? `${usd(selectedCard.ebay_sold_low)} – ${usd(selectedCard.ebay_sold_high)}` : '—'}
+                    </div>
+                  </div>
                 </div>
               </div>
 
