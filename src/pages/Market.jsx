@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 
@@ -19,6 +20,7 @@ function timeAgo(d) {
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 
 export default function Market() {
+  const [searchParams] = useSearchParams()
   const [cards, setCards]             = useState([])
   const [selected, setSelected]       = useState(null)
   const [history, setHistory]         = useState([])
@@ -26,6 +28,7 @@ export default function Market() {
   const [runResult, setRunResult]     = useState(null)
   const [loading, setLoading]         = useState(true)
   const [lastChecked, setLastChecked] = useState(null)
+  const [search, setSearch]           = useState('')
 
   useEffect(() => {
     async function load() {
@@ -84,7 +87,19 @@ export default function Market() {
     setRunning(false)
   }
 
+  useEffect(() => {
+    const cardId = searchParams.get('card')
+    if (cardId && cards.length > 0) {
+      setSelected(cardId)
+      const card = cards.find(c => c.card_id === cardId)
+      if (card) setSearch(card.name)
+    }
+  }, [cards, searchParams])
+
   const selectedCard = cards.find(c => c.card_id === selected)
+  const filteredCards = search.trim()
+    ? cards.filter(c => c.name?.toLowerCase().includes(search.toLowerCase()))
+    : cards
 
   return (
     <div className="page">
@@ -134,11 +149,20 @@ export default function Market() {
               </span>
             )}
           </div>
+          <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)' }}>
+            <input
+              className="form-input"
+              style={{ fontSize: 12, padding: '6px 10px' }}
+              placeholder="Search cards…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+          </div>
           {loading ? (
             <div className="loading" style={{ padding: 24 }}>Loading…</div>
-          ) : cards.length === 0 ? (
-            <div className="empty-state" style={{ padding: 24 }}>No price data yet</div>
-          ) : cards.map(c => (
+          ) : filteredCards.length === 0 ? (
+            <div className="empty-state" style={{ padding: 24 }}>{search ? 'No cards match.' : 'No price data yet'}</div>
+          ) : filteredCards.map(c => (
             <div
               key={c.card_id}
               onClick={() => setSelected(c.card_id)}

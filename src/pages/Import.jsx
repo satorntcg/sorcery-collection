@@ -1,14 +1,12 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 
-function getSheetUrls(url, boxesGid, packsGid, listingsGid) {
+function getSheetUrls(url, listingsGid) {
   const pubIdMatch = url.match(/\/d\/e\/([^/]+)/)
   if (!pubIdMatch) return null
   const pubId = pubIdMatch[1]
   return {
     cards:    `https://docs.google.com/spreadsheets/d/e/${pubId}/pub?gid=0&single=true&output=csv`,
-    boxes:    `https://docs.google.com/spreadsheets/d/e/${pubId}/pub?gid=${boxesGid}&single=true&output=csv`,
-    packs:    `https://docs.google.com/spreadsheets/d/e/${pubId}/pub?gid=${packsGid}&single=true&output=csv`,
     listings: listingsGid ? `https://docs.google.com/spreadsheets/d/e/${pubId}/pub?gid=${listingsGid}&single=true&output=csv` : null,
   }
 }
@@ -34,11 +32,6 @@ const RARITY_MAP = {
   'ordinary':'ordinary','o':'ordinary','exceptional':'exceptional','e':'exceptional',
   'elite':'elite','el':'elite','unique':'unique','u':'unique',
 }
-const BOX_TYPE_MAP = {
-  'booster_box':'booster_box','booster box':'booster_box',
-  'prerelease_kit':'prerelease_kit','prerelease kit':'prerelease_kit',
-  'bundle':'bundle','other':'other',
-}
 
 function normalizeCard(row) {
   return {
@@ -52,107 +45,115 @@ function normalizeCard(row) {
     image_url:    null,
     notes:        row.notes?.trim() || null,
     _pack_ref:    row.pack_ref?.trim() || null,
-    _quantity:    1,
+    _box_ref:     row.box_ref?.trim()  || null,
   }
 }
 
-function normalizeBox(row) {
-  return {
-    name:           row.name?.trim() || null,
-    set_name:       (row.set_name ?? row.set ?? 'Gothic').trim(),
-    box_type:       BOX_TYPE_MAP[row.box_type?.toLowerCase().trim()] ?? 'booster_box',
-    purchase_price: parseFloat(row.purchase_price ?? '0') || 0,
-    pack_count:     parseInt(row.pack_count ?? '36') || 36,
-    pack_msrp:      parseFloat(row.pack_msrp ?? '5') || 5,
-    purchased_at:   row.purchased_at ? new Date(row.purchased_at).toISOString() : new Date().toISOString(),
-    seller:         row.seller?.trim() || null,
-    notes:          row.notes?.trim() || null,
-    _ref:           row.ref?.trim() || null,
-  }
-}
-
-function normalizePack(row) {
-  return {
-    pack_number: parseInt(row.pack_number ?? '1') || 1,
-    opened_at:   row.opened_at ? new Date(row.opened_at).toISOString() : new Date().toISOString(),
-    notes:       row.notes?.trim() || null,
-    _box_ref:    row.box_ref?.trim() || null,
-    _ref:        row.ref?.trim() || null,
-  }
-}
-
-async function runImport(cardRows, boxRows, packRows, onLog) {
-  let cardCount = 0, boxCount = 0, packCount = 0, skipped = 0, errorCount = 0
-  const boxRefMap = {}
-  const packRefMap = {}
-
-  for (const raw of boxRows) {
-    const box = normalizeBox(raw)
-    const ref = box._ref; delete box._ref
-    if (!box.purchase_price) { onLog('warn', `Skipping box with no price: ${raw.set_name}`); continue }
-    const { data: existing } = await supabase.from('boxes').select('id')
-      .eq('set_name', box.set_name).eq('purchase_price', box.purchase_price).eq('pack_count', box.pack_count).maybeSingle()
-    if (existing) { if (ref) boxRefMap[ref] = existing.id; onLog('info', `Skipped (exists): ${box.set_name} box`); skipped++; continue }
-    const { data, error } = await supabase.from('boxes').insert(box).select('id').single()
-    if (error) { onLog('error', `Box (${box.set_name}): ${error.message}`); errorCount++; continue }
-    if (ref) boxRefMap[ref] = data.id
-    onLog('success', `Box: ${box.set_name} — ${box.pack_count} packs @ $${box.pack_msrp}`)
-    boxCount++
-  }
-
-  for (const raw of packRows) {
-    const pack = normalizePack(raw)
-    const ref = pack._ref; const boxRef = pack._box_ref
-    delete pack._ref; delete pack._box_ref
-    const boxId = boxRefMap[boxRef]
-    if (!boxId) { onLog('warn', `Pack ${pack.pack_number}: no matching box_ref "${boxRef}"`); continue }
-    const { data: existing } = await supabase.from('packs').select('id')
-      .eq('box_id', boxId).eq('pack_number', pack.pack_number).maybeSingle()
-    if (existing) { if (ref) packRefMap[ref] = existing.id; onLog('info', `Skipped (exists): Pack #${pack.pack_number}`); skipped++; continue }
-    const { data, error } = await supabase.from('packs').insert({ ...pack, box_id: boxId }).select('id').single()
-    if (error) { onLog('error', `Pack ${pack.pack_number}: ${error.message}`); errorCount++; continue }
-    if (ref) packRefMap[ref] = data.id
-    onLog('success', `Pack #${pack.pack_number} → box ${boxRef}`)
-    packCount++
-  }
+async function runImport(cardRows, onLog) {
+  let cardCount = 0, updatedCount = 0, skipped = 0, errorCount = 0
+  const packIdCache = {}
 
   for (const raw of cardRows) {
     const card = normalizeCard(raw)
     const packRef = card._pack_ref
-    const quantity = card._quantity ?? 1
-    delete card._pack_ref; delete card._quantity
+    const boxRef  = card._box_ref
+    delete card._pack_ref
+    delete card._box_ref
     if (!card.name) { onLog('warn', 'Skipping row with no name'); continue }
-    const packId = packRef ? packRefMap[packRef] : null
-    const { data: existing } = await supabase.from('cards').select('id, quantity_owned')
-      .ilike('name', card.name).eq('set_name', card.set_name).eq('condition', card.condition).eq('foil', card.foil).maybeSingle()
-    if (existing && packId) {
-      const { data: existingLink } = await supabase.from('pack_cards').select('id')
-        .eq('pack_id', packId).eq('card_id', existing.id).maybeSingle()
-      if (existingLink) { onLog('info', `Skipped (already imported): ${card.name} → ${packRef}`); skipped++; continue }
+
+    // Resolve pack_ref → pack id, creating the pack if it doesn't exist yet
+    let packId = null
+    if (packRef) {
+      if (packIdCache[packRef] === undefined) {
+        const { data: existingPack } = await supabase.from('packs').select('id, pack_number').eq('pack_ref', packRef).maybeSingle()
+        if (existingPack) {
+          packIdCache[packRef] = existingPack.id
+          const refNumMatch = packRef.match(/_p(\d+)$/i)
+          if (refNumMatch) {
+            const expectedNum = parseInt(refNumMatch[1])
+            if (existingPack.pack_number !== expectedNum) {
+              await supabase.from('packs').update({ pack_number: expectedNum }).eq('id', existingPack.id)
+              onLog('info', `Corrected pack "${packRef}": #${existingPack.pack_number} → #${expectedNum}`)
+            }
+          }
+        } else if (boxRef) {
+          const { data: box } = await supabase.from('boxes').select('id').eq('box_ref', boxRef).maybeSingle()
+          if (!box) {
+            onLog('warn', `No box found for box_ref "${boxRef}" — skipping ${card.name}`)
+            packIdCache[packRef] = null
+          } else {
+            const refNumMatch = packRef.match(/_p(\d+)$/i)
+            let packNumber = refNumMatch ? parseInt(refNumMatch[1]) : null
+            if (!packNumber) {
+              const { data: maxPack } = await supabase.from('packs').select('pack_number')
+                .eq('box_id', box.id).order('pack_number', { ascending: false }).limit(1).maybeSingle()
+              packNumber = (maxPack?.pack_number ?? 0) + 1
+            }
+            const { data: newPack, error } = await supabase.from('packs')
+              .insert({ box_id: box.id, pack_ref: packRef, pack_number: packNumber })
+              .select('id').single()
+            if (error) {
+              onLog('error', `Failed to create pack "${packRef}": ${error.message}`)
+              packIdCache[packRef] = null
+            } else {
+              onLog('success', `Created pack "${packRef}" (#${packNumber}) in box "${boxRef}"`)
+              packIdCache[packRef] = newPack.id
+            }
+          }
+        } else {
+          onLog('warn', `Pack "${packRef}" not found and no box_ref provided — skipping ${card.name}`)
+          packIdCache[packRef] = null
+        }
+      }
+      packId = packIdCache[packRef]
+      if (!packId) { skipped++; continue }
     }
+
+    // Find existing card
+    let existing = null
+    if (card.tcgplayer_id) {
+      const { data } = await supabase.from('cards').select('id, quantity_owned')
+        .eq('tcgplayer_id', card.tcgplayer_id).maybeSingle()
+      existing = data
+    }
+    if (!existing) {
+      const { data } = await supabase.from('cards').select('id, quantity_owned')
+        .ilike('name', card.name).ilike('set_name', card.set_name).eq('condition', card.condition).eq('foil', card.foil).maybeSingle()
+      existing = data
+    }
+
+    // If card exists and is already linked to this pack → skip
+    if (existing && packId) {
+      const { data: link } = await supabase.from('pack_cards').select('id')
+        .eq('pack_id', packId).eq('card_id', existing.id).maybeSingle()
+      if (link) { onLog('info', `Skipped (exists): ${card.name} → ${packRef}`); skipped++; continue }
+    }
+
+    // Insert card if new, otherwise increment quantity
     let cardId
     if (existing) {
       cardId = existing.id
-      const nextQuantity = Number(existing.quantity_owned ?? 0) + quantity
-      const { error } = await supabase.from('cards').update({ quantity_owned: nextQuantity }).eq('id', cardId)
+      const { error } = await supabase.from('cards')
+        .update({ quantity_owned: Number(existing.quantity_owned ?? 0) + 1 }).eq('id', cardId)
       if (error) { onLog('error', `Card quantity (${card.name}): ${error.message}`); errorCount++; continue }
-      onLog('info', `Updated quantity: ${card.name} (now ${nextQuantity} owned)`)
+      onLog('info', `Linked: ${card.name} → ${packRef ?? 'no pack'}`)
+      updatedCount++
     } else {
-      const { data, error } = await supabase.from('cards').insert({ ...card, quantity_owned: quantity }).select('id').single()
+      const { data, error } = await supabase.from('cards').insert({ ...card, quantity_owned: 1 }).select('id').single()
       if (error) { onLog('error', `Card (${card.name}): ${error.message}`); errorCount++; continue }
       cardId = data.id
       onLog('success', `Added: ${card.name} (${card.rarity})`)
       cardCount++
     }
+
+    // Link card to pack
     if (packId) {
-      const { error } = await supabase.from('pack_cards').insert({ pack_id: packId, card_id: cardId, quantity })
+      const { error } = await supabase.from('pack_cards').insert({ pack_id: packId, card_id: cardId, quantity: 1 })
       if (error) onLog('warn', `Link failed ${card.name} → ${packRef}: ${error.message}`)
-    } else if (packRef) {
-      onLog('warn', `No matching pack for ref "${packRef}" (card: ${card.name})`)
     }
   }
 
-  return { cardCount, boxCount, packCount, skipped, errorCount }
+  return { cardCount, updatedCount, skipped, errorCount }
 }
 
 async function runListingsImport(listingRows, onLog) {
@@ -282,8 +283,6 @@ async function runListingsImport(listingRows, onLog) {
 
 export default function Import() {
   const [sheetUrl, setSheetUrl]     = useState('https://docs.google.com/spreadsheets/d/e/2PACX-1vTgjSY3ZKa5WFKauWOjlVQfuKCqhQD3p2c485h1jMV_iP8oatHLc_lQn3_4dGDO66VagE2hcTbGZWQ5/pub?output=csv')
-  const [boxesGid, setBoxesGid]     = useState('1200631871')
-  const [packsGid, setPacksGid]     = useState('894617018')
   const [listingsGid, setListingsGid] = useState('1267977612')
   const [status, setStatus]         = useState('idle')
   const [logs, setLogs]             = useState([])
@@ -303,7 +302,7 @@ export default function Import() {
   async function fetchPreview() {
     if (!sheetUrl.trim()) return
     setStatus('fetching'); setLogs([])
-    const urls = getSheetUrls(sheetUrl, boxesGid, packsGid, listingsGid)
+    const urls = getSheetUrls(sheetUrl, listingsGid)
     if (!urls) { addLog('error', 'Could not parse URL'); setStatus('error'); return }
     try {
       if (activeTab === 'cards') {
@@ -312,19 +311,8 @@ export default function Import() {
         const cardsRes = await fetch(urls.cards)
         if (!cardsRes.ok) throw new Error(`Cards sheet not accessible (${cardsRes.status})`)
         const cardRows = parseCsv(await cardsRes.text())
-
-        addLog('info', 'Fetching Boxes…')
-        const boxRes  = await fetch(urls.boxes)
-        const boxRows = boxRes.ok ? parseCsv(await boxRes.text()) : []
-        if (!boxRes.ok) addLog('warn', 'Boxes sheet not found')
-
-        addLog('info', 'Fetching Packs…')
-        const packRes  = await fetch(urls.packs)
-        const packRows = packRes.ok ? parseCsv(await packRes.text()) : []
-        if (!packRes.ok) addLog('warn', 'Packs sheet not found')
-
-        addLog('success', `Found ${cardRows.length} cards · ${boxRows.length} boxes · ${packRows.length} packs`)
-        setPreview({ cards: cardRows, boxes: boxRows, packs: packRows })
+        addLog('success', `Found ${cardRows.length} cards`)
+        setPreview({ cards: cardRows })
       } else {
         setListingPreview(null); setListingSummary(null)
         if (!urls.listings) { addLog('error', 'No listings gid set'); setStatus('error'); return }
@@ -345,7 +333,7 @@ export default function Import() {
   async function doImport() {
     if (!preview) return
     setStatus('importing'); setLogs([])
-    const result = await runImport(preview.cards, preview.boxes, preview.packs, addLog)
+    const result = await runImport(preview.cards, addLog)
     setSummary(result); setStatus('done')
   }
 
@@ -375,12 +363,12 @@ export default function Import() {
     <div className="page" style={{ maxWidth: 900 }}>
       <div className="page-header">
         <h1 className="page-title">Bulk Import</h1>
-        <p className="page-subtitle">Import boxes, packs, cards, and eBay listings from Google Sheets</p>
+        <p className="page-subtitle">Import cards and eBay listings from Google Sheets</p>
       </div>
 
       {/* Tab selector */}
       <div style={{ display: 'flex', gap: 4, marginBottom: 20 }}>
-        {[['cards', 'Cards / Boxes / Packs'], ['listings', 'eBay Listings'], ['ebay_csv', 'eBay Order History']].map(([id, label]) => (
+        {[['cards', 'Cards'], ['listings', 'eBay Listings'], ['ebay_csv', 'eBay Order History']].map(([id, label]) => (
           <button key={id} className={`btn btn-sm ${activeTab === id ? 'btn-primary' : 'btn-ghost'}`}
             onClick={() => setActiveTab(id)}>{label}</button>
         ))}
@@ -391,23 +379,14 @@ export default function Import() {
         <>
           {/* Sheet structure */}
           <div className="panel mb-16">
-            <div className="panel-header"><span className="panel-title">Google Sheet structure — 3 tabs</span></div>
+            <div className="panel-header"><span className="panel-title">Google Sheet structure — Cards tab</span></div>
             <div className="panel-body" style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
-              {[
-                { tab: 'Cards', cols: 'name | set_name | set_code | rarity | foil | pack_ref | tcgplayer_id | notes', note: 'Condition defaults to near_mint. Quantity is always 1 per pack pull.' },
-                { tab: 'Boxes', cols: 'ref | name | set_name | box_type | purchase_price | pack_count | pack_msrp | purchased_at | seller | notes', note: 'ref is a short unique ID e.g. "gothic_box1".' },
-                { tab: 'Packs', cols: 'ref | box_ref | pack_number | opened_at | notes', note: 'box_ref matches the ref in Boxes.' },
-              ].map(({ tab, cols, note }) => (
-                <div key={tab} style={{ marginBottom: 14 }}>
-                  <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:5 }}>
-                    <span style={{ background:'var(--bg-raised)', border:'1px solid var(--border)', borderRadius:4, padding:'1px 8px', fontSize:11, fontWeight:500, color:'var(--gold-light)' }}>{tab}</span>
-                  </div>
-                  <div style={{ fontFamily:'monospace', fontSize:11, background:'var(--bg-void)', padding:'8px 12px', borderRadius:6, marginBottom:4 }}>{cols}</div>
-                  <div style={{ fontSize:12, color:'var(--text-muted)' }}>↳ {note}</div>
-                </div>
-              ))}
-              <div style={{ background:'var(--info-bg)', border:'1px solid rgba(76,132,201,0.25)', borderRadius:8, padding:'10px 14px', fontSize:12, marginTop:8 }}>
-                <strong style={{ color:'var(--info)' }}>Safe to re-run:</strong> Skips boxes, packs, and cards that already exist.
+              <div style={{ fontFamily:'monospace', fontSize:11, background:'var(--bg-void)', padding:'8px 12px', borderRadius:6, marginBottom:4 }}>
+                name | set_name | set_code | rarity | foil | pack_ref | box_ref | tcgplayer_id | notes
+              </div>
+              <div style={{ fontSize:12, color:'var(--text-muted)', marginBottom:12 }}>↳ Condition defaults to near_mint. <code style={{ background:'var(--bg-void)', padding:'1px 5px', borderRadius:4 }}>pack_ref</code> links the card to a pack — if the pack doesn't exist yet, <code style={{ background:'var(--bg-void)', padding:'1px 5px', borderRadius:4 }}>box_ref</code> is used to create it.</div>
+              <div style={{ background:'var(--info-bg)', border:'1px solid rgba(76,132,201,0.25)', borderRadius:8, padding:'10px 14px', fontSize:12 }}>
+                <strong style={{ color:'var(--info)' }}>Safe to re-run:</strong> Cards already linked to their pack are skipped. New cards are inserted; existing cards pulled from a new pack get a new pack link added.
               </div>
             </div>
           </div>
@@ -419,16 +398,6 @@ export default function Import() {
               <div className="form-group">
                 <label className="form-label">Published sheet URL</label>
                 <input className="form-input" value={sheetUrl} onChange={e => setSheetUrl(e.target.value)} />
-              </div>
-              <div className="form-row">
-                <div className="form-group">
-                  <label className="form-label">Boxes tab gid</label>
-                  <input className="form-input" placeholder="e.g. 1200631871" value={boxesGid} onChange={e => setBoxesGid(e.target.value)} />
-                </div>
-                <div className="form-group">
-                  <label className="form-label">Packs tab gid</label>
-                  <input className="form-input" placeholder="Click Packs tab, get gid from URL" value={packsGid} onChange={e => setPacksGid(e.target.value)} />
-                </div>
               </div>
               <button className="btn btn-primary" onClick={fetchPreview}
                 disabled={!sheetUrl.trim() || status === 'fetching'}>
@@ -442,15 +411,11 @@ export default function Import() {
             <div className="panel mb-16">
               <div className="panel-header">
                 <span className="panel-title">Preview</span>
-                <div style={{ fontSize:12, color:'var(--text-muted)', display:'flex', gap:16 }}>
-                  <span>{preview.boxes.length} boxes</span>
-                  <span>{preview.packs.length} packs</span>
-                  <span>{preview.cards.length} cards</span>
-                </div>
+                <span style={{ fontSize:12, color:'var(--text-muted)' }}>{preview.cards.length} cards</span>
               </div>
               <table className="data-table">
                 <thead><tr>
-                  <th>Name</th><th>Set</th><th>Rarity</th><th>Foil</th><th>Pack ref</th><th>TCGPlayer ID</th>
+                  <th>Name</th><th>Set</th><th>Rarity</th><th>Foil</th><th>Pack ref</th><th>Box ref</th><th>TCGPlayer ID</th>
                 </tr></thead>
                 <tbody>
                   {preview.cards.slice(0, 20).map((row, i) => {
@@ -462,18 +427,19 @@ export default function Import() {
                         <td><span className={`badge badge-${c.rarity}`}>{c.rarity}</span></td>
                         <td>{c.foil ? '✓' : ''}</td>
                         <td style={{ fontSize:11, color:'var(--text-muted)' }}>{c._pack_ref || '—'}</td>
+                        <td style={{ fontSize:11, color:'var(--text-muted)' }}>{c._box_ref || '—'}</td>
                         <td style={{ fontSize:11, color:'var(--text-muted)' }}>{row.tcgplayer_id || '—'}</td>
                       </tr>
                     )
                   })}
                   {preview.cards.length > 20 && (
-                    <tr><td colSpan={6} style={{ textAlign:'center', color:'var(--text-muted)', fontSize:12 }}>…and {preview.cards.length - 20} more</td></tr>
+                    <tr><td colSpan={7} style={{ textAlign:'center', color:'var(--text-muted)', fontSize:12 }}>…and {preview.cards.length - 20} more</td></tr>
                   )}
                 </tbody>
               </table>
               <div style={{ padding:'14px 20px', borderTop:'1px solid var(--border)', display:'flex', justifyContent:'flex-end' }}>
                 <button className="btn btn-primary" onClick={doImport} disabled={status === 'importing'}>
-                  {status === 'importing' ? '⟳ Importing…' : `Import ${preview.boxes.length} boxes · ${preview.packs.length} packs · ${preview.cards.length} cards`}
+                  {status === 'importing' ? '⟳ Importing…' : `Import ${preview.cards.length} cards`}
                 </button>
               </div>
             </div>
@@ -485,7 +451,7 @@ export default function Import() {
               <div className="alert-content">
                 <div className="alert-title">Import complete</div>
                 <div className="alert-desc">
-                  {summary.boxCount} new boxes · {summary.packCount} new packs · {summary.cardCount} new cards · {summary.skipped} skipped · {summary.errorCount} errors
+                  {summary.cardCount} new · {summary.updatedCount} linked · {summary.skipped} skipped · {summary.errorCount} errors
                 </div>
               </div>
             </div>

@@ -9,9 +9,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `npm run preview` — serve the built bundle locally
 - No test, lint, or typecheck scripts are configured.
 
-Env vars (required, loaded by Vite at startup — `src/lib/supabase.js` throws if missing):
+Env vars (required for full functionality — `src/lib/supabase.js` throws at startup if the Supabase vars are missing):
 - `VITE_SUPABASE_URL`
 - `VITE_SUPABASE_ANON_KEY`
+- `VITE_ANTHROPIC_KEY` — required by Listing Suggestions (AI lot analysis) and Rules Chat
+- `VITE_OPENAI_KEY` — required by Rules Chat (embedding lookups via OpenAI)
 
 ## Architecture
 
@@ -33,6 +35,7 @@ Pure client-side SPA: Vite + React 18 + react-router-dom v6, talking directly to
 | `/youtube` | `YouTube.jsx` | Pack opening tracker + shareable summary cards |
 | `/import` | `Import.jsx` | Google Sheets bulk import |
 | `/settings` | `Settings.jsx` | `check_schedule` settings row |
+| `/rules` | `RulesChat.jsx` | RAG-based rulebook Q&A chatbot |
 
 **Dead file:** `src/pages/Listings.jsx` is an older, simpler listing view that is no longer imported. The active file is `src/pages/Ebaylistings.jsx`. Do not edit `Listings.jsx`.
 
@@ -40,18 +43,19 @@ Pure client-side SPA: Vite + React 18 + react-router-dom v6, talking directly to
 
 `src/lib/supabase.js` exports a single shared `supabase` client. Pages call it directly with `supabase.from(...)` — there is no repository/service abstraction. When changing data flow, grep page files for the relevant table/view name.
 
-Tables referenced by the UI (verify column existence against the actual Supabase project before assuming):
-- `cards` — primary inventory: `name, set_name, set_code, rarity, condition, foil, quantity_owned, quantity_listed, quantity_available, active_listing_count, cost_basis, image_url, tcgplayer_id, notes`
-- `price_snapshots` — historical TCGPlayer + eBay prices per card
-- `price_alerts` — generated alerts: `alert_type, message, old_price, new_price, your_list_price, pct_change, dismissed`
-- `ebay_listings` — user's outbound listings: `card_id, title, listed_price, shipping_cost, sold_price, ebay_fees, net_proceeds, status, notes, cost_basis`
-- `ebay_listing_cards` — junction table for multi-card listings: `listing_id, card_id, price`
-- `boxes` + `box_cards` — sealed product purchases and the cards pulled from them (for P&L)
-- `packs` — individual packs within a box: `id, box_id, pack_number`
+Tables referenced by the UI:
+- `cards` — primary inventory: `name, set_name, set_code, rarity, condition, foil, quantity_owned, quantity_listed, cost_basis, image_url, tcgplayer_id, notes` (`quantity_available` and `active_listing_count` are view-only — read from `v_inventory_dashboard`, not this table)
+- `price_snapshots` — historical prices: `card_id, tcgplayer_low, tcgplayer_mid, tcgplayer_market, ebay_sold_avg, ebay_sold_low, ebay_sold_high`
+- `price_alerts` — generated alerts: `card_id, alert_type, message, old_price, new_price, pct_change, dismissed`
+- `ebay_listings` — outbound listings: `card_id, title, listed_price, shipping_cost, condition, ebay_fee, net_listed, status, ebay_url, notes, cost_basis`; sold fields: `sold_price, sold_shipping, sold_ebay_fee, net_profit, sold_at`
+- `ebay_listing_cards` — junction for multi-card listings: `listing_id, card_id, price, quantity`
+- `boxes` — sealed product purchases: `name, set_name, set_code, box_type, purchase_price, pack_count, pack_msrp, purchased_at, opened_at, seller, notes, box_ref` (`box_ref` is a unique slug used for import linking)
+- `packs` — individual packs within a box: `box_id, pack_number, opened_at, notes, pack_ref` (`pack_ref` is a unique slug used for import linking)
 - `pack_cards` — cards recorded within each pack: `pack_id, card_id, quantity`
 - `youtube_openings` — video opening records: `id, title, box_id, youtube_url, filmed_at`
 - `youtube_opening_packs` — junction: which packs appear in a given opening: `opening_id, pack_id`
-- `check_schedule` — single-row settings table: `frequency, run_at_hour, alert_pct_up, alert_pct_down`
+- `check_schedule` — single-row settings table: `frequency, run_at_hour, alert_pct_up, alert_pct_down, stale_days, email_alerts, email_address`
+- `document_chunks` — rulebook embeddings for RAG: `source, source_id, content, embedding (vector), metadata (jsonb)` — queried via the `match_documents` RPC, not directly
 
 Enums used in inserts (must match the DB):
 - rarity: `ordinary | exceptional | elite | unique`
@@ -79,7 +83,7 @@ The pricing pipeline runs in Supabase, not the browser. The Market page can manu
 
 ### Listing Suggestions + AI (Listingsuggestions.jsx)
 
-Groups unlisted elite/unique cards into eBay lots using a client-side algorithm (`groupCards`): uniques get solo listings, elite foils and non-foils are packed into lots of ≤ 6 cards targeting ≥ $20 total. After grouping, the "AI analyse lots" button calls the **Anthropic Messages API directly from the browser** (`https://api.anthropic.com/v1/messages`) — this requires an API key to be present in the request headers; that key is currently hardcoded or missing (check the fetch call in `getAISuggestions`). Creating a listing writes to `ebay_listings` and `ebay_listing_cards`, then increments `quantity_listed` on each card.
+Groups unlisted elite/unique cards into eBay lots using a client-side algorithm (`groupCards`): uniques get solo listings, elite foils and non-foils are packed into lots of ≤ 6 cards targeting ≥ $20 total. After grouping, the "AI analyse lots" button calls the **Anthropic Messages API directly from the browser** (`https://api.anthropic.com/v1/messages`) using `VITE_ANTHROPIC_KEY`. Creating a listing writes to `ebay_listings` and `ebay_listing_cards`, then increments `quantity_listed` on each card.
 
 Fee constants in this file (`EBAY_FEE_PCT = 0.129`, `EBAY_FEE_FLAT = 0.30`, `DEFAULT_SHIP = 5.00`) are shared with `Ebaylistings.jsx` — if you change fee rates, update both files.
 
@@ -93,7 +97,16 @@ Imports cards + boxes from a published Google Sheet (`/pub` or `/spreadsheets/d/
 
 ### WeeklyMovers component
 
-`src/components/Weeklymovers.jsx` reads `v_price_gainers_losers` and renders top-5 gainers/losers side by side. It exists but is **not yet wired into Dashboard.jsx** — import and drop in `<WeeklyMovers />` to activate it.
+`src/components/Weeklymovers.jsx` reads `v_price_gainers_losers` and renders top-5 gainers/losers side by side. It is imported and rendered in `Dashboard.jsx`.
+
+### Rules Chat (RulesChat.jsx)
+
+RAG-based chatbot for answering Sorcery TCG rules questions. On each query it:
+1. Calls OpenAI `text-embedding-3-small` (`VITE_OPENAI_KEY`) to embed the user question
+2. Calls Supabase RPC `match_documents` (pgvector similarity search) to retrieve relevant rulebook chunks where `source = 'rulebook'`
+3. Passes retrieved chunks as context to Anthropic `claude-haiku-4-5-20251001` (`VITE_ANTHROPIC_KEY`) to generate the answer
+
+The `match_documents` RPC and the rulebook document embeddings must be set up in the Supabase project before this page works. The conversation history is kept in component state only (not persisted to the DB).
 
 ### Styling
 

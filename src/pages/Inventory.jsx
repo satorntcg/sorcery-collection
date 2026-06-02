@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
 const usd = (n) => n != null ? `$${Number(n).toFixed(2)}` : '—'
@@ -88,6 +89,7 @@ function exportTCGPlayerCSV(cards) {
 }
 
 export default function Inventory() {
+  const navigate = useNavigate()
   const [cards, setCards]           = useState([])
   const [loading, setLoading]       = useState(true)
   const [search, setSearch]         = useState('')
@@ -102,14 +104,29 @@ export default function Inventory() {
   const [newPackNumber, setNewPackNumber] = useState(1)
   const [inStockOnly, setInStockOnly]    = useState(false)
   const [exportResult, setExportResult]  = useState(null)
+  const [provenance, setProvenance]      = useState({})
+  const [expanded, setExpanded]          = useState(new Set())
 
   async function load() {
     setLoading(true)
-    const { data } = await supabase
-      .from('v_inventory_dashboard')
-      .select('*')
-      .order('name')
-    setCards(data ?? [])
+    const [{ data: cardData }, { data: packLinks }] = await Promise.all([
+      supabase.from('v_inventory_dashboard').select('*').order('name'),
+      supabase.from('pack_cards').select('card_id, quantity, packs(pack_number, pack_ref, boxes(name, set_name))'),
+    ])
+    setCards(cardData ?? [])
+
+    const provMap = {}
+    for (const link of (packLinks ?? [])) {
+      const cid = link.card_id
+      if (!provMap[cid]) provMap[cid] = []
+      provMap[cid].push({
+        box_name:    link.packs?.boxes?.name || link.packs?.boxes?.set_name || '—',
+        pack_number: link.packs?.pack_number,
+        pack_ref:    link.packs?.pack_ref,
+        quantity:    link.quantity,
+      })
+    }
+    setProvenance(provMap)
     setLoading(false)
   }
 
@@ -197,6 +214,14 @@ export default function Inventory() {
     } else {
       const res = await supabase.from('cards').update(payload).eq('id', form.id)
       error = res.error
+      if (!error) {
+        const newQty = parseInt(form.quantity_owned) || 0
+        const { data: links } = await supabase.from('pack_cards')
+          .select('id').eq('card_id', form.id).order('created_at', { ascending: false })
+        if (links && links.length > newQty) {
+          await supabase.from('pack_cards').delete().in('id', links.slice(newQty).map(l => l.id))
+        }
+      }
     }
 
     setSaving(false)
@@ -211,6 +236,7 @@ export default function Inventory() {
   }
 
   async function confirmDelete() {
+    await supabase.from('pack_cards').delete().eq('card_id', deleteId)
     await supabase.from('cards').delete().eq('id', deleteId)
     setDeleteId(null)
     load()
@@ -220,6 +246,14 @@ export default function Inventory() {
     ...prev,
     [field]: e.target.type === 'checkbox' ? e.target.checked : e.target.value
   }))
+
+  function toggleExpand(id) {
+    setExpanded(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
 
   return (
     <div className="page">
@@ -282,36 +316,74 @@ export default function Inventory() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map(card => (
-                <tr key={card.card_id ?? card.id}>
-                  <td>
-                    <div className="name-cell">{card.name}</div>
-                    <div className="set-cell">{card.set_name}{card.foil ? ' · Foil' : ''}</div>
-                  </td>
-                  <td><span className={`badge badge-${card.rarity}`}>{card.rarity}</span></td>
-                  <td className="text-muted" style={{ fontSize: 12 }}>
-                    {card.condition?.replace(/_/g, ' ')}
-                  </td>
-                  <td className="text-right">{card.quantity_owned}</td>
-                  <td className="text-right text-muted">{usd(card.cost_basis)}</td>
-                  <td className="text-right">{usd(card.tcgplayer_market)}</td>
-                  <td className="text-right">{usd(card.ebay_sold_avg)}</td>
-                  <td className="text-right text-gold">{usd(card.market_value)}</td>
-                  <td className="text-right">
-                    <span className={card.unrealized_pnl >= 0 ? 'text-success' : 'text-danger'}>
-                      {card.unrealized_pnl != null
-                        ? `${card.unrealized_pnl >= 0 ? '+' : ''}${usd(card.unrealized_pnl)}`
-                        : '—'}
-                    </span>
-                  </td>
-                  <td>
-                    <div className="flex gap-8" style={{ justifyContent: 'flex-end' }}>
-                      <button className="btn btn-ghost btn-sm" onClick={() => openEdit(card)}>Edit</button>
-                      <button className="btn btn-danger btn-sm" onClick={() => setDeleteId(card.card_id ?? card.id)}>Delete</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {filtered.map(card => {
+                const id   = card.card_id ?? card.id
+                const prov = provenance[id] ?? []
+                const isExpanded = expanded.has(id)
+                return (
+                  <>
+                    <tr key={id} onClick={() => prov.length && toggleExpand(id)}
+                      style={{ cursor: prov.length ? 'pointer' : 'default' }}>
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          {prov.length > 0 && (
+                            <span style={{ fontSize: 10, color: 'var(--text-muted)', userSelect: 'none', minWidth: 10 }}>
+                              {isExpanded ? '▾' : '▸'}
+                            </span>
+                          )}
+                          <div>
+                            <div className="name-cell">{card.name}</div>
+                            <div className="set-cell">{card.set_name}{card.foil ? ' · Foil' : ''}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td><span className={`badge badge-${card.rarity}`}>{card.rarity}</span></td>
+                      <td className="text-muted" style={{ fontSize: 12 }}>
+                        {card.condition?.replace(/_/g, ' ')}
+                      </td>
+                      <td className="text-right">{card.quantity_owned}</td>
+                      <td className="text-right text-muted">{usd(card.cost_basis)}</td>
+                      <td className="text-right">{usd(card.tcgplayer_market)}</td>
+                      <td className="text-right">{usd(card.ebay_sold_avg)}</td>
+                      <td className="text-right text-gold">{usd(card.market_value)}</td>
+                      <td className="text-right">
+                        <span className={card.unrealized_pnl >= 0 ? 'text-success' : 'text-danger'}>
+                          {card.unrealized_pnl != null
+                            ? `${card.unrealized_pnl >= 0 ? '+' : ''}${usd(card.unrealized_pnl)}`
+                            : '—'}
+                        </span>
+                      </td>
+                      <td onClick={e => e.stopPropagation()}>
+                        <div className="flex gap-8" style={{ justifyContent: 'flex-end' }}>
+                          <button className="btn btn-ghost btn-sm" onClick={() => navigate(`/market?card=${id}`)} title="View price history">↗</button>
+                          <button className="btn btn-ghost btn-sm" onClick={() => openEdit(card)}>Edit</button>
+                          <button className="btn btn-danger btn-sm" onClick={() => setDeleteId(id)}>Delete</button>
+                        </div>
+                      </td>
+                    </tr>
+                    {isExpanded && prov.length > 0 && (
+                      <tr key={`${id}-prov`} style={{ background: 'var(--bg-raised)' }}>
+                        <td colSpan={10} style={{ padding: '8px 16px 10px 32px' }}>
+                          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                            Pulled from
+                          </div>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                            {prov.map((p, i) => (
+                              <span key={i} style={{
+                                background: 'var(--bg-void)', border: '1px solid var(--border)',
+                                borderRadius: 4, padding: '2px 8px', fontSize: 12, color: 'var(--text-secondary)',
+                              }}>
+                                {p.box_name} › Pack #{p.pack_number}
+                                {p.quantity > 1 ? <span style={{ color: 'var(--text-muted)' }}> ×{p.quantity}</span> : ''}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </>
+                )
+              })}
             </tbody>
           </table>
         </div>

@@ -342,16 +342,15 @@ function EditModal({ listing, cards, onClose, onSaved }) {
       // Check ebay_listing_cards junction table
       const { data: junctionRows } = await supabase
         .from('ebay_listing_cards')
-        .select('card_id, cards(id, name, rarity, foil, set_name)')
+        .select('card_id, quantity, cards(id, name, rarity, foil, set_name)')
         .eq('listing_id', listing.id)
       if (junctionRows?.length) {
-        setLinkedCards(junctionRows.map(r => r.cards).filter(Boolean))
+        setLinkedCards(junctionRows.map(r => ({ ...r.cards, qty: r.quantity ?? 1 })).filter(Boolean))
       } else if (listing.card_id) {
-        // Single card linked via card_id
         const { data: card } = await supabase
           .from('cards').select('id, name, rarity, foil, set_name')
           .eq('id', listing.card_id).single()
-        if (card) setLinkedCards([card])
+        if (card) setLinkedCards([{ ...card, qty: 1 }])
       }
       setLoadingCards(false)
     }
@@ -368,10 +367,21 @@ function EditModal({ listing, cards, onClose, onSaved }) {
       ).slice(0, 10)
     : []
 
-  function toggleCard(card) {
+  function addCard(card) {
     setLinkedCards(prev => {
       const exists = prev.find(c => c.id === card.id)
-      return exists ? prev.filter(c => c.id !== card.id) : [...prev, card]
+      return exists
+        ? prev.map(c => c.id === card.id ? { ...c, qty: (c.qty ?? 1) + 1 } : c)
+        : [...prev, { ...card, qty: 1 }]
+    })
+  }
+
+  function removeCard(card) {
+    setLinkedCards(prev => {
+      const existing = prev.find(c => c.id === card.id)
+      if (!existing) return prev
+      if ((existing.qty ?? 1) <= 1) return prev.filter(c => c.id !== card.id)
+      return prev.map(c => c.id === card.id ? { ...c, qty: c.qty - 1 } : c)
     })
   }
 
@@ -388,16 +398,17 @@ function EditModal({ listing, cards, onClose, onSaved }) {
         ebay_url:      ebayUrl.trim() || null,
         notes:         notes.trim() || null,
         // Set card_id to first linked card if only one, null if multiple
-        card_id:       linkedCards.length === 1 ? linkedCards[0].id : null,
+        card_id:       linkedCards.length === 1 && (linkedCards[0].qty ?? 1) === 1 ? linkedCards[0].id : null,
       }).eq('id', listing.id)
       if (err) throw err
 
       // Rebuild ebay_listing_cards junction rows
       await supabase.from('ebay_listing_cards').delete().eq('listing_id', listing.id)
       if (linkedCards.length > 0) {
-        const perCardPrice = parseFloat((p / linkedCards.length).toFixed(2))
+        const totalQty = linkedCards.reduce((sum, c) => sum + (c.qty ?? 1), 0)
+        const perCardPrice = parseFloat((p / totalQty).toFixed(2))
         await supabase.from('ebay_listing_cards').insert(
-          linkedCards.map(c => ({ listing_id: listing.id, card_id: c.id, price: perCardPrice }))
+          linkedCards.map(c => ({ listing_id: listing.id, card_id: c.id, price: perCardPrice, quantity: c.qty ?? 1 }))
         )
       }
 
@@ -406,8 +417,8 @@ function EditModal({ listing, cards, onClose, onSaved }) {
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" style={{ maxWidth: 560 }} onClick={e => e.stopPropagation()}>
+    <div className="modal-overlay" onClick={e => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="modal" style={{ maxWidth: 560 }}>
         <div className="modal-header">
           <span className="modal-title">Edit listing</span>
           <button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>
@@ -461,7 +472,8 @@ function EditModal({ listing, cards, onClose, onSaved }) {
                     borderRadius: 4, color: 'var(--gold-light)',
                   }}>
                     {c.name}{c.foil ? ' ✦' : ''}
-                    <button onClick={() => toggleCard(c)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 14, padding: 0, lineHeight: 1 }}>×</button>
+                    {(c.qty ?? 1) > 1 && <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>×{c.qty}</span>}
+                    <button onClick={() => removeCard(c)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 14, padding: 0, lineHeight: 1 }}>×</button>
                   </div>
                 ))}
               </div>
@@ -483,7 +495,7 @@ function EditModal({ listing, cards, onClose, onSaved }) {
                   return (
                     <div
                       key={c.card_id}
-                      onClick={() => { toggleCard({ id: c.card_id, name: c.name, rarity: c.rarity, foil: c.foil, set_name: c.set_name }); setCardSearch('') }}
+                      onClick={e => { e.stopPropagation(); addCard({ id: c.card_id, name: c.name, rarity: c.rarity, foil: c.foil, set_name: c.set_name }); setCardSearch('') }}
                       style={{
                         padding: '8px 12px', cursor: 'pointer', fontSize: 13,
                         background: isLinked ? 'rgba(201,168,76,0.06)' : 'transparent',

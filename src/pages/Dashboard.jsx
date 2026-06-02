@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import WeeklyMovers from '../components/WeeklyMovers'
 
 const toNumber = (value) => {
@@ -29,6 +29,8 @@ const pnlClass  = (v) => v == null ? 'text-muted' : v >= 0 ? 'text-success' : 't
 const formatPnl = (v) => v != null ? `${v >= 0 ? '+' : ''}${usd(v)}` : '—'
 const usd       = (n) => n != null ? `$${Number(n).toFixed(2)}` : '—'
 const pct       = (n) => n != null ? `${n > 0 ? '+' : ''}${Number(n).toFixed(1)}%` : '—'
+const fmtPct    = (n) => { if (n == null) return '—'; const v = Number(n); return `${v >= 0 ? '+' : ''}${v.toFixed(1)}%` }
+const fmtDate   = (d) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'
 
 function PriceChange({ value }) {
   if (value == null) return <span className="text-muted">—</span>
@@ -38,6 +40,7 @@ function PriceChange({ value }) {
 }
 
 export default function Dashboard() {
+  const navigate = useNavigate()
   const [inventory, setInventory] = useState([])
   const [alerts, setAlerts]       = useState([])
   const [loading, setLoading]     = useState(true)
@@ -47,15 +50,24 @@ export default function Dashboard() {
       setLoading(true)
       const [invRes, alertRes] = await Promise.all([
         supabase.from('v_inventory_dashboard').select('*'),
-        supabase.from('v_active_alerts').select('*').limit(5),
+        supabase.from('v_active_alerts').select('*').gte('new_price', 1),
       ])
       const inventoryRows = invRes.data ?? []
-      setInventory([...inventoryRows].sort((a, b) => (getMarketValue(b) ?? 0) - (getMarketValue(a) ?? 0)))
+      setInventory(
+        [...inventoryRows]
+          .filter(c => (c.quantity_owned ?? 0) > 0)
+          .sort((a, b) => (Number(b.tcgplayer_market) || 0) - (Number(a.tcgplayer_market) || 0))
+      )
       setAlerts(alertRes.data ?? [])
       setLoading(false)
     }
     load()
   }, [])
+
+  async function dismissAlert(id) {
+    await supabase.from('price_alerts').update({ dismissed: true }).eq('id', id)
+    setAlerts(prev => prev.filter(a => a.id !== id))
+  }
 
   const totalMarketValue   = inventory.reduce((s, c) => s + (getMarketValue(c) ?? 0), 0)
   const totalUnrealizedPnl = inventory.reduce((s, c) => s + (getUnrealizedPnl(c) ?? 0), 0)
@@ -107,84 +119,57 @@ export default function Dashboard() {
       {/* Weekly movers widget */}
       <WeeklyMovers />
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-
-        {/* Top holdings */}
-        <div className="panel">
-          <div className="panel-header">
-            <span className="panel-title">Top Holdings</span>
-            <Link to="/inventory" className="btn btn-ghost btn-sm">View all</Link>
-          </div>
-          {topMovers.length === 0 ? (
-            <div className="empty-state">
-              <div className="empty-state-icon">🃏</div>
-              No cards yet — add some in Inventory
-            </div>
-          ) : (
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Card</th>
-                  <th className="text-right">Market</th>
-                  <th className="text-right">P&L</th>
-                </tr>
-              </thead>
-              <tbody>
-                {topMovers.map(card => {
-                  const pnl = getUnrealizedPnl(card)
-                  return (
-                    <tr key={card.card_id ?? card.id}>
-                      <td>
-                        <div className="name-cell">{card.name}</div>
-                        <div className="set-cell">{card.set_name} · ×{card.quantity_owned}</div>
-                      </td>
-                      <td className="text-right">{usd(card.tcgplayer_market)}</td>
-                      <td className="text-right">
-                        <span className={pnlClass(pnl)}>{formatPnl(pnl)}</span>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          )}
-        </div>
-
-        {/* Active alerts */}
-        <div className="panel">
+      {/* Active alerts */}
+      <div className="panel mb-16">
           <div className="panel-header">
             <span className="panel-title">Price Alerts</span>
             <Link to="/alerts" className="btn btn-ghost btn-sm">View all</Link>
           </div>
-          <div className="panel-body" style={{ padding: '12px' }}>
+          <div style={{ padding: '8px 12px' }}>
             {alerts.length === 0 ? (
               <div className="empty-state">
                 <div className="empty-state-icon">✓</div>
                 No alerts — prices look stable
               </div>
-            ) : alerts.map(alert => {
-              const isSpike = alert.alert_type === 'price_spike'
-              const cls     = isSpike ? 'success' : 'warning'
-              const icon    = isSpike ? '📈' : '📉'
-              return (
-                <div key={alert.id} className={`alert-item ${cls}`}>
-                  <span className="alert-icon">{icon}</span>
-                  <div className="alert-content">
-                    <div className="alert-title">{alert.card_name}</div>
-                    <div className="alert-desc">{alert.message}</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {alerts.map(a => (
+                  <div key={a.id} className={`alert-item ${a.alert_type === 'price_spike' ? 'success' : 'danger'}`}>
+                    <span className="alert-icon">{a.alert_type === 'price_spike' ? '↑' : '↓'}</span>
+                    <div className="alert-content">
+                      <div className="alert-title">{a.card_name}{a.foil ? ' ✦' : ''} — {a.set_name}</div>
+                      <div className="alert-desc">{a.message}</div>
+                      <div style={{ display: 'flex', gap: 10, marginTop: 4, alignItems: 'center' }}>
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{fmtDate(a.created_at)}</span>
+                        {a.listing_id && (
+                          <button onClick={() => navigate(`/listings?highlight=${a.listing_id}`)} style={{ fontSize: 11, color: 'var(--gold)', background: 'none', border: 'none', borderBottom: '1px dashed var(--gold)', padding: 0, cursor: 'pointer' }}>View listing →</button>
+                        )}
+                        {a.ebay_url && (
+                          <a href={a.ebay_url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: 'var(--text-secondary)', textDecoration: 'none', borderBottom: '1px dashed var(--border-mid)' }}>eBay ↗</a>
+                        )}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, flexShrink: 0 }}>
+                      <span style={{ fontSize: 16, fontWeight: 500, color: a.alert_type === 'price_spike' ? 'var(--success)' : 'var(--danger)' }}>
+                        {fmtPct(a.pct_change)}
+                      </span>
+                      <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                        {usd(a.old_price)} → {usd(a.new_price)}
+                      </div>
+                      <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }} onClick={() => dismissAlert(a.id)}>Dismiss</button>
+                    </div>
                   </div>
-                </div>
-              )
-            })}
+                ))}
+              </div>
+            )}
           </div>
         </div>
-      </div>
 
       {/* Inventory overview */}
       {inventory.length > 0 && (
         <div className="panel mt-16">
           <div className="panel-header">
-            <span className="panel-title">Inventory Overview</span>
+            <span className="panel-title">Top Holdings</span>
           </div>
           <table className="data-table">
             <thead>
@@ -193,21 +178,19 @@ export default function Dashboard() {
                 <th>Set</th>
                 <th>Rarity</th>
                 <th className="text-right">Qty</th>
-                <th className="text-right">TCGPlayer</th>
                 <th className="text-right">eBay Avg</th>
-                <th className="text-right">Market Value</th>
+                <th className="text-right">TCGPlayer</th>
               </tr>
             </thead>
             <tbody>
-              {inventory.slice(0, 10).map(card => (
+              {inventory.filter(c => c.tcgplayer_market && (c.quantity_owned ?? 0) > 0).slice(0, 10).map(card => (
                 <tr key={card.card_id ?? card.id}>
-                  <td className="name-cell">{card.name}</td>
+                  <td className="name-cell">{card.name}{card.foil ? ' ✦' : ''}</td>
                   <td className="text-muted">{card.set_name}</td>
                   <td><span className={`badge badge-${card.rarity}`}>{card.rarity}</span></td>
                   <td className="text-right">{card.quantity_owned}</td>
-                  <td className="text-right">{usd(card.tcgplayer_market)}</td>
-                  <td className="text-right">{usd(card.ebay_sold_avg)}</td>
-                  <td className="text-right text-gold">{usd(getMarketValue(card))}</td>
+                  <td className="text-right text-muted">{usd(card.ebay_sold_avg)}</td>
+                  <td className="text-right text-gold">{usd(card.tcgplayer_market)}</td>
                 </tr>
               ))}
             </tbody>
