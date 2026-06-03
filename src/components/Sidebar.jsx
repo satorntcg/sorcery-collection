@@ -4,7 +4,7 @@ const NAV = [
   {
     section: 'Overview',
     items: [
-      { to: '/', label: 'Dashboard', icon: <GridIcon /> },
+      { to: '/dashboard', label: 'Dashboard', icon: <GridIcon /> },
       { to: '/alerts', label: 'Price Alerts', icon: <BellIcon />, badge: true },
       { to: '/rules', label: 'Rules Chat', icon: <BookIcon /> },
     ],
@@ -46,7 +46,7 @@ export default function Sidebar({ alertCount = 0, onSignOut }) {
               <NavLink
                 key={to}
                 to={to}
-                end={to === '/'}
+                end={to === '/dashboard'}
                 className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
               >
                 {icon}

@@ -231,7 +231,7 @@ export default function Alerts({ onDismiss }) {
               display: 'flex', alignItems: 'center', gap: 6,
             }}>
               <span style={{ opacity: 0.5 }}>ⓘ</span>
-              Gap = listed price vs TCGPlayer market. Listings are flagged when listed price is more than 10% above or below market.
+              Gap = (listed price − shipping) vs TCGPlayer market. Listings are flagged when the card price portion is more than 10% above or below market.
             </div>
             <div className="panel">
               <table className="data-table">

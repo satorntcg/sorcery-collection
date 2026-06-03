@@ -1,0 +1,198 @@
+import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
+import { supabase } from '../lib/supabase'
+
+export default function Home() {
+  const [cardCount, setCardCount] = useState(null)
+  const [setCount, setSetCount]   = useState(null)
+
+  useEffect(() => {
+    document.title = 'SatornTCG — Sorcery: Contested Realm Companion'
+
+    async function fetchStats() {
+      const [countRes, setsRes] = await Promise.all([
+        supabase.from('cards').select('*', { count: 'exact', head: true }),
+        supabase.from('cards').select('set_name'),
+      ])
+      if (countRes.count != null) setCardCount(countRes.count)
+      if (setsRes.data) {
+        const unique = new Set(setsRes.data.map(r => r.set_name).filter(Boolean))
+        setSetCount(unique.size)
+      }
+    }
+
+    fetchStats()
+  }, [])
+
+  return (
+    <div style={{ maxWidth: '900px', margin: '0 auto', padding: '48px 24px' }}>
+
+      {/* Section 1 — Hero */}
+      <section>
+        <p style={{
+          textTransform: 'uppercase',
+          color: 'var(--gold)',
+          fontSize: '12px',
+          letterSpacing: '0.12em',
+          marginBottom: '16px',
+        }}>
+          Sorcery: Contested Realm
+        </p>
+        <h1 style={{
+          fontFamily: 'var(--font-display)',
+          fontSize: 'clamp(32px, 5vw, 52px)',
+          color: 'var(--text-primary)',
+          lineHeight: 1.15,
+          marginBottom: '16px',
+        }}>
+          Your Collection Companion
+        </h1>
+        <p style={{
+          color: 'var(--text-secondary)',
+          fontSize: '16px',
+          maxWidth: '480px',
+          lineHeight: 1.7,
+        }}>
+          Browse card prices, master the rules, and track your collection. Built for Sorcery players.
+        </p>
+        <div style={{ display: 'flex', gap: '12px', marginTop: '32px', flexWrap: 'wrap' }}>
+          <Link to="/cards" className="btn btn-primary">
+            Browse Cards
+          </Link>
+          <Link to="/rules" className="btn btn-ghost">
+            Rules Oracle
+          </Link>
+        </div>
+      </section>
+
+      {/* Section 2 — Stats bar */}
+      <section style={{ marginTop: '56px' }}>
+        <div className="panel" style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(3, 1fr)',
+          padding: '20px 32px',
+          gap: '0',
+        }}>
+          {[
+            { value: cardCount, label: 'Cards Tracked' },
+            { value: setCount,  label: 'Sets' },
+            { value: '✓',       label: 'Live TCG Prices' },
+          ].map((stat, i) => (
+            <div
+              key={i}
+              style={{
+                textAlign: 'center',
+                padding: '8px 16px',
+                borderRight: i < 2 ? '1px solid var(--border)' : 'none',
+              }}
+            >
+              <div style={{
+                color: 'var(--gold)',
+                fontSize: '28px',
+                fontWeight: 600,
+                lineHeight: 1.2,
+              }}>
+                {stat.value != null ? stat.value : '—'}
+              </div>
+              <div style={{
+                color: 'var(--text-muted)',
+                fontSize: '12px',
+                marginTop: '4px',
+              }}>
+                {stat.label}
+              </div>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Section 3 — Feature cards */}
+      <section style={{
+        marginTop: '56px',
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+        gap: '16px',
+      }}>
+
+        {/* Rules Oracle */}
+        <div className="panel" style={{ padding: '24px' }}>
+          <div style={{ fontSize: '28px', marginBottom: '12px' }}>⚔️</div>
+          <div style={{
+            fontFamily: 'var(--font-display)',
+            fontSize: '15px',
+            color: 'var(--gold-light)',
+            marginBottom: '8px',
+          }}>
+            Rules Oracle
+          </div>
+          <p style={{
+            fontSize: '13px',
+            color: 'var(--text-secondary)',
+            lineHeight: 1.65,
+            marginBottom: '16px',
+          }}>
+            Ask any question about Sorcery rules. Powered by the official rulebook and AI.
+          </p>
+          <Link to="/rules" style={{
+            color: 'var(--gold)',
+            fontSize: '13px',
+            textDecoration: 'none',
+          }}>
+            Ask the Oracle →
+          </Link>
+        </div>
+
+        {/* Card Database */}
+        <div className="panel" style={{ padding: '24px' }}>
+          <div style={{ fontSize: '28px', marginBottom: '12px' }}>🃏</div>
+          <div style={{
+            fontFamily: 'var(--font-display)',
+            fontSize: '15px',
+            color: 'var(--gold-light)',
+            marginBottom: '8px',
+          }}>
+            Card Database
+          </div>
+          <p style={{
+            fontSize: '13px',
+            color: 'var(--text-secondary)',
+            lineHeight: 1.65,
+            marginBottom: '16px',
+          }}>
+            Browse all cards with live TCGPlayer market prices and in-stock availability.
+          </p>
+          <Link to="/cards" style={{
+            color: 'var(--gold)',
+            fontSize: '13px',
+            textDecoration: 'none',
+          }}>
+            Browse Cards →
+          </Link>
+        </div>
+
+        {/* Price Tracker */}
+        <div className="panel" style={{ padding: '24px' }}>
+          <div style={{ fontSize: '28px', marginBottom: '12px' }}>📊</div>
+          <div style={{
+            fontFamily: 'var(--font-display)',
+            fontSize: '15px',
+            color: 'var(--gold-light)',
+            marginBottom: '8px',
+          }}>
+            Price Tracker
+          </div>
+          <p style={{
+            fontSize: '13px',
+            color: 'var(--text-secondary)',
+            lineHeight: 1.65,
+            marginBottom: '16px',
+          }}>
+            Weekly price movers, gainers and losers across the full Sorcery catalogue.
+          </p>
+          <span className="badge badge-ordinary">Coming soon</span>
+        </div>
+
+      </section>
+    </div>
+  )
+}
