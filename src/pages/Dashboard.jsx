@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { Link, useNavigate } from 'react-router-dom'
-import WeeklyMovers from '../components/WeeklyMovers'
+import WeeklyMovers from '../components/Weeklymovers'
 
 const toNumber = (value) => {
   if (value == null || value === '') return null
