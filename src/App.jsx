@@ -18,6 +18,7 @@ import RulesChat from './pages/RulesChat'
 import Home from './pages/Home'
 import PublicCards from './pages/PublicCards'
 import CardDetail from './pages/CardDetail'
+import Contact from './pages/Contact'
 
 function PublicLayout({ session }) {
   return (
@@ -82,6 +83,7 @@ export default function App() {
         <Route path="/cards"     element={<PublicCards />} />
         <Route path="/cards/:id" element={<CardDetail />} />
         <Route path="/rules"     element={<RulesChat />} />
+        <Route path="/contact"   element={<Contact />} />
       </Route>
 
       {/* Login — redirect to dashboard if already signed in */}

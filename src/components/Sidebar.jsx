@@ -76,6 +76,15 @@ export default function Sidebar({ alertCount = 0, onSignOut }) {
           <span className="status-dot" />
           Connected to Supabase
         </div>
+        <a
+          href="/"
+          target="_blank"
+          rel="noreferrer"
+          className="btn btn-ghost btn-sm"
+          style={{ width: '100%', justifyContent: 'center', fontSize: 11, marginBottom: 6, textDecoration: 'none' }}
+        >
+          View Public Site ↗
+        </a>
         <button
           className="btn btn-ghost btn-sm"
           style={{ width: '100%', justifyContent: 'center', fontSize: 11 }}

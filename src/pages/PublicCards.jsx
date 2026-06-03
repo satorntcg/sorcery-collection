@@ -8,23 +8,53 @@ export default function PublicCards() {
   const [cards, setCards]         = useState([])
   const [loading, setLoading]     = useState(true)
   const [search, setSearch]       = useState('')
-  const [rarityFilter, setRarity] = useState('all')
-  const [setFilter, setSetFilter] = useState('all')
+  const [rarityFilter,  setRarity]      = useState('all')
+  const [setFilter,     setSetFilter]   = useState('all')
+  const [ebayOnly,      setEbayOnly]    = useState(false)
+
+  const [ebayMap, setEbayMap] = useState(new Map())
 
   useEffect(() => {
     document.title = 'Card Database — SatornTCG'
 
-    async function fetchCards() {
+    async function fetchAll() {
       setLoading(true)
-      const { data } = await supabase
-        .from('v_inventory_dashboard')
-        .select('id, name, set_name, rarity, foil, condition, tcgplayer_market, quantity_available, image_url')
-        .order('name')
-      setCards(data ?? [])
+      const [{ data: cardData }, { data: singleData }, { data: lotData }] = await Promise.all([
+        supabase
+          .from('v_inventory_dashboard')
+          .select('id, name, set_name, rarity, foil, condition, tcgplayer_market, quantity_owned, image_url')
+          .order('name'),
+        // single-card listings
+        supabase
+          .from('ebay_listings')
+          .select('card_id, ebay_url, listed_price')
+          .eq('status', 'active')
+          .not('card_id', 'is', null),
+        // cards inside multi-card lots
+        supabase
+          .from('ebay_listing_cards')
+          .select('card_id, ebay_listings!listing_id(ebay_url, listed_price, status, card_id)'),
+      ])
+      setCards(cardData ?? [])
+
+      const map = new Map()
+      function addToMap(cardId, listing) {
+        const existing = map.get(cardId)
+        if (!existing || listing.listed_price < existing.listed_price) map.set(cardId, listing)
+      }
+
+      for (const l of (singleData ?? [])) addToMap(l.card_id, l)
+      for (const lc of (lotData ?? [])) {
+        const l = lc.ebay_listings
+        if (!l || l.status !== 'active' || l.card_id !== null) continue
+        addToMap(lc.card_id, { ebay_url: l.ebay_url, listed_price: l.listed_price })
+      }
+
+      setEbayMap(map)
       setLoading(false)
     }
 
-    fetchCards()
+    fetchAll()
   }, [])
 
   const sets = useMemo(() => {
@@ -37,9 +67,10 @@ export default function PublicCards() {
       if (search && !c.name?.toLowerCase().includes(search.toLowerCase())) return false
       if (rarityFilter !== 'all' && c.rarity !== rarityFilter) return false
       if (setFilter !== 'all' && c.set_name !== setFilter) return false
+      if (ebayOnly && !ebayMap.has(c.id)) return false
       return true
     })
-  }, [cards, search, rarityFilter, setFilter])
+  }, [cards, search, rarityFilter, setFilter, ebayOnly, ebayMap])
 
   return (
     <div style={{ maxWidth: '1100px', margin: '0 auto', padding: '32px 24px' }}>
@@ -84,6 +115,15 @@ export default function PublicCards() {
             <option key={s} value={s}>{s}</option>
           ))}
         </select>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--text-secondary)', cursor: 'pointer', userSelect: 'none' }}>
+          <input
+            type="checkbox"
+            checked={ebayOnly}
+            onChange={e => setEbayOnly(e.target.checked)}
+            style={{ accentColor: 'var(--gold)', width: 15, height: 15, cursor: 'pointer' }}
+          />
+          eBay listings only
+        </label>
       </div>
 
       {/* Results count */}
@@ -106,8 +146,9 @@ export default function PublicCards() {
                 <th>Card</th>
                 <th>Set</th>
                 <th>Rarity</th>
-                <th style={{ textAlign: 'right' }}>Price</th>
+                <th style={{ textAlign: 'right' }}>TCG Price</th>
                 <th style={{ textAlign: 'right' }}>In Stock</th>
+                <th style={{ textAlign: 'right' }}>eBay Listing</th>
               </tr>
             </thead>
             <tbody>
@@ -136,11 +177,24 @@ export default function PublicCards() {
                     )}
                   </td>
                   <td style={{ textAlign: 'right' }}>
-                    {(c.quantity_available ?? 0) > 0 ? (
-                      <span className="text-success">{c.quantity_available}</span>
+                    {(c.quantity_owned ?? 0) > 0 ? (
+                      <span className="text-success">{c.quantity_owned}</span>
                     ) : (
                       <span className="text-muted">—</span>
                     )}
+                  </td>
+                  <td style={{ textAlign: 'right' }}>
+                    {(() => {
+                      const l = ebayMap.get(c.id)
+                      if (!l) return <span className="text-muted">—</span>
+                      if (l.ebay_url) return (
+                        <a href={l.ebay_url} target="_blank" rel="noreferrer"
+                          style={{ fontSize: 12, color: 'var(--gold)', textDecoration: 'none', whiteSpace: 'nowrap' }}>
+                          {usd(l.listed_price)} ↗
+                        </a>
+                      )
+                      return <span style={{ fontSize: 12, color: 'var(--gold)', whiteSpace: 'nowrap' }}>{usd(l.listed_price)}</span>
+                    })()}
                   </td>
                 </tr>
               ))}

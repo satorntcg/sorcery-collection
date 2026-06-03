@@ -193,6 +193,33 @@ export default function Home() {
         </div>
 
       </section>
+
+      {/* Contact strip */}
+      <section style={{
+        marginTop: 56,
+        padding: '28px 32px',
+        background: 'var(--bg-card)',
+        border: '1px solid var(--border)',
+        borderRadius: 'var(--radius-md)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: 16,
+      }}>
+        <div>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: 15, color: 'var(--gold-light)', marginBottom: 4 }}>
+            Questions or looking to buy?
+          </div>
+          <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0 }}>
+            Get in touch and we'll get back to you as soon as possible.
+          </p>
+        </div>
+        <Link to="/contact" className="btn btn-primary" style={{ flexShrink: 0 }}>
+          Contact Us
+        </Link>
+      </section>
+
     </div>
   )
 }

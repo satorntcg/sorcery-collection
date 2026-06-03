@@ -23,14 +23,11 @@ export default function Login() {
     }}>
       <div style={{ width: 360 }}>
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <div style={{
-            width: 48, height: 48,
-            background: 'linear-gradient(135deg, var(--gold-dim), var(--gold))',
-            borderRadius: 10, display: 'flex', alignItems: 'center',
-            justifyContent: 'center', margin: '0 auto 16px',
-            fontFamily: 'var(--font-display)', fontSize: 22,
-            fontWeight: 700, color: 'var(--bg-void)',
-          }}>S</div>
+          <img
+            src="/favicon.png"
+            alt="SatornTCG"
+            style={{ width: 96, height: 96, borderRadius: 20, display: 'block', margin: '0 auto 16px' }}
+          />
           <div style={{ fontFamily: 'var(--font-display)', fontSize: 16, letterSpacing: '0.1em', color: 'var(--gold)' }}>
             SORCERY TCG
           </div>

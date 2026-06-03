@@ -63,6 +63,20 @@ export default function PublicNav({ session }) {
         >
           Rules Oracle
         </NavLink>
+        <NavLink
+          to="/contact"
+          style={({ isActive }) => ({
+            padding: '6px 14px',
+            borderRadius: 'var(--radius-sm)',
+            fontSize: '13px',
+            textDecoration: 'none',
+            color: isActive ? 'var(--gold)' : 'var(--text-secondary)',
+            background: isActive ? 'rgba(201,168,76,0.08)' : 'transparent',
+            transition: 'all var(--transition)',
+          })}
+        >
+          Contact
+        </NavLink>
       </div>
 
       {/* Right: Auth action */}

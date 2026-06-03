@@ -244,7 +244,7 @@ export default function RulesChat() {
   const meta    = MODE_META[mode]
 
   return (
-    <div className="page" style={{ maxWidth: 780, display: 'flex', flexDirection: 'column', height: 'calc(100vh - 56px)' }}>
+    <div className="page" style={{ maxWidth: 780, width: '100%', margin: '0 auto', display: 'flex', flexDirection: 'column', height: 'calc(100vh - 56px)' }}>
 
       {/* Header */}
       <div className="page-header" style={{ marginBottom: 20 }}>
