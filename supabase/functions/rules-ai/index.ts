@@ -6,6 +6,14 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+function err(msg: string, status = 500) {
+  console.error('[rules-ai]', msg)
+  return new Response(JSON.stringify({ error: msg }), {
+    status,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  })
+}
+
 async function getEmbedding(text: string): Promise<number[]> {
   const res = await fetch('https://api.openai.com/v1/embeddings', {
     method: 'POST',
@@ -16,17 +24,18 @@ async function getEmbedding(text: string): Promise<number[]> {
     body: JSON.stringify({ model: 'text-embedding-ada-002', input: text }),
   })
   const data = await res.json()
-  if (!data.data) throw new Error('Embedding failed')
+  if (!data.data) throw new Error(`OpenAI embedding failed: ${JSON.stringify(data.error ?? data)}`)
   return data.data[0].embedding
 }
 
 async function fetchChunks(supabase: any, embedding: number[], filterSource: string, count: number) {
-  const { data } = await supabase.rpc('match_documents', {
+  const { data, error } = await supabase.rpc('match_documents', {
     query_embedding: embedding,
     match_threshold: 0.65,
     match_count: count,
     filter_source: filterSource,
   })
+  if (error) throw new Error(`match_documents failed: ${error.message}`)
   return data ?? []
 }
 
@@ -68,35 +77,52 @@ serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
   const authHeader = req.headers.get('Authorization')
-  if (!authHeader) return new Response('Unauthorized', { status: 401, headers: corsHeaders })
+  if (!authHeader) return err('No auth header', 401)
 
   const supabase = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_ANON_KEY')!,
     { global: { headers: { Authorization: authHeader } } }
   )
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return new Response('Unauthorized', { status: 401, headers: corsHeaders })
+  const { data: { user }, error: authErr } = await supabase.auth.getUser()
+  if (authErr || !user) return err(`Auth failed: ${authErr?.message ?? 'no user'}`, 401)
 
-  const { question, mode } = await req.json()
+  let body: any
+  try {
+    body = await req.json()
+  } catch (e) {
+    return err(`Invalid JSON body: ${e}`, 400)
+  }
+  const { question, mode } = body
+
+  if (!question || !mode) return err('Missing question or mode', 400)
 
   const serviceSupabase = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
   )
 
-  const embedding = await getEmbedding(question)
+  let embedding: number[]
+  try {
+    embedding = await getEmbedding(question)
+  } catch (e: any) {
+    return err(e.message)
+  }
 
   let chunks: any
-  if (mode === 'compare') {
-    const [sorcery, mtg] = await Promise.all([
-      fetchChunks(serviceSupabase, embedding, 'rulebook', 3),
-      fetchChunks(serviceSupabase, embedding, 'mtg_guide', 3),
-    ])
-    chunks = { sorcery, mtg }
-  } else {
-    const source = mode === 'mtg' ? 'mtg_guide' : 'rulebook'
-    chunks = { single: await fetchChunks(serviceSupabase, embedding, source, 5) }
+  try {
+    if (mode === 'compare') {
+      const [sorcery, mtg] = await Promise.all([
+        fetchChunks(serviceSupabase, embedding, 'rulebook', 3),
+        fetchChunks(serviceSupabase, embedding, 'mtg_guide', 3),
+      ])
+      chunks = { sorcery, mtg }
+    } else {
+      const source = mode === 'mtg' ? 'mtg_guide' : 'rulebook'
+      chunks = { single: await fetchChunks(serviceSupabase, embedding, source, 5) }
+    }
+  } catch (e: any) {
+    return err(e.message)
   }
 
   const noMatch = mode === 'compare'
@@ -109,7 +135,7 @@ serve(async (req) => {
     })
   }
 
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+  const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -124,10 +150,10 @@ serve(async (req) => {
     }),
   })
 
-  const data = await res.json()
-  if (data.error) throw new Error(data.error.message)
+  const claudeData = await claudeRes.json()
+  if (claudeData.error) return err(`Claude error: ${claudeData.error.message}`)
 
-  return new Response(JSON.stringify({ answer: data.content[0].text }), {
+  return new Response(JSON.stringify({ answer: claudeData.content[0].text }), {
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   })
 })

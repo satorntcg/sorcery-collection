@@ -94,7 +94,8 @@ export default function RulesChat() {
       }
 
       const { data, error } = await supabase.functions.invoke('rules-ai', { body: { question, mode } })
-      if (error) throw error
+      if (error) throw new Error(error.message ?? String(error))
+      if (data?.error) throw new Error(data.error)
       if (data.noMatch) {
         setMessages(prev => [...prev, {
           role:    'assistant',
@@ -106,10 +107,10 @@ export default function RulesChat() {
       setMessages(prev => [...prev, { role: 'assistant', content: data.answer, mode }])
       logQuestion(question, mode, data.answer)
       loadFaq(mode).then(setFaqQuestions)
-    } catch {
+    } catch (e) {
       setMessages(prev => [...prev, {
         role:    'assistant',
-        content: 'Something went wrong. Please try again.',
+        content: `Error: ${e?.message ?? 'Unknown error'}`,
         error:   true,
       }])
     } finally {
