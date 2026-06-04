@@ -110,6 +110,19 @@ export default function CardDetail() {
         ← Back to Cards
       </button>
 
+      {/* Card header — name/meta above both columns */}
+      <div style={{ marginBottom: 20 }}>
+        <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '24px', color: 'var(--text-primary)', marginBottom: '4px' }}>
+          {card.name}
+        </h1>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <span className="set-cell">{card.set_name}</span>
+          {card.foil && <span className="badge badge-ok">✦ Foil</span>}
+          {card.rarity && <span className={`badge badge-${card.rarity}`}>{card.rarity}</span>}
+          {card.condition && <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{conditionLabel(card.condition)}</span>}
+        </div>
+      </div>
+
       {/* Card layout */}
       <div style={{ display: 'flex', gap: '32px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
 
@@ -166,40 +179,8 @@ export default function CardDetail() {
         {/* RIGHT: Details */}
         <div style={{ flex: 1, minWidth: '280px' }}>
 
-          {/* Name */}
-          <h1 style={{
-            fontFamily: 'var(--font-display)',
-            fontSize: '24px',
-            color: 'var(--text-primary)',
-            marginBottom: '4px',
-          }}>
-            {card.name}
-          </h1>
-
-          {/* Set + foil row */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-            <span className="set-cell">{card.set_name}</span>
-            {card.foil && (
-              <span className="badge badge-ok">✦ Foil</span>
-            )}
-          </div>
-
-          {/* Rarity */}
-          {card.rarity && (
-            <div style={{ marginTop: '8px' }}>
-              <span className={`badge badge-${card.rarity}`}>{card.rarity}</span>
-            </div>
-          )}
-
-          {/* Condition */}
-          {card.condition && (
-            <div style={{ marginTop: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>
-              Condition: {conditionLabel(card.condition)}
-            </div>
-          )}
-
           {/* Prices panel */}
-          <div className="panel" style={{ marginTop: '24px', padding: '16px 20px' }}>
+          <div className="panel" style={{ padding: '16px 20px' }}>
             <div style={{ textTransform: 'uppercase', fontSize: '11px', letterSpacing: '0.08em', color: 'var(--text-muted)', marginBottom: '12px' }}>
               TCGPlayer
             </div>
