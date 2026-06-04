@@ -3,22 +3,19 @@ import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
 export default function Home() {
-  const [cardCount, setCardCount] = useState(null)
-  const [setCount, setSetCount]   = useState(null)
+  const [cardCount,  setCardCount]  = useState(null)
+  const [videoCount, setVideoCount] = useState(null)
 
   useEffect(() => {
     document.title = 'SatornTCG — Sorcery: Contested Realm Companion'
 
     async function fetchStats() {
-      const [countRes, setsRes] = await Promise.all([
+      const [countRes, videoRes] = await Promise.all([
         supabase.from('cards').select('*', { count: 'exact', head: true }),
-        supabase.from('cards').select('set_name'),
+        supabase.from('youtube_openings').select('*', { count: 'exact', head: true }),
       ])
-      if (countRes.count != null) setCardCount(countRes.count)
-      if (setsRes.data) {
-        const unique = new Set(setsRes.data.map(r => r.set_name).filter(Boolean))
-        setSetCount(unique.size)
-      }
+      if (countRes.count  != null) setCardCount(countRes.count)
+      if (videoRes.count  != null) setVideoCount(videoRes.count)
     }
 
     fetchStats()
@@ -57,7 +54,7 @@ export default function Home() {
         </p>
         <div style={{ display: 'flex', gap: '12px', marginTop: '32px', flexWrap: 'wrap' }}>
           <Link to="/cards" className="btn btn-primary">
-            Browse Cards
+            Card Prices
           </Link>
           <Link to="/rules" className="btn btn-ghost">
             Rules Assistant
@@ -74,9 +71,9 @@ export default function Home() {
           gap: '0',
         }}>
           {[
-            { value: cardCount, label: 'Cards Tracked' },
-            { value: setCount,  label: 'Sets' },
-            { value: '✓',       label: 'Live TCG Prices' },
+            { value: cardCount,  label: 'Cards Tracked' },
+            { value: videoCount, label: 'Pack Opening Videos' },
+            { value: '✓',        label: 'Live TCG Prices' },
           ].map((stat, i) => (
             <div
               key={i}
@@ -166,20 +163,20 @@ export default function Home() {
             fontSize: '13px',
             textDecoration: 'none',
           }}>
-            Browse Cards →
+            View Card Prices →
           </Link>
         </div>
 
-        {/* Price Tracker */}
+        {/* Pack Openings */}
         <div className="panel" style={{ padding: '24px' }}>
-          <div style={{ fontSize: '28px', marginBottom: '12px' }}>📊</div>
+          <div style={{ fontSize: '28px', marginBottom: '12px' }}>📦</div>
           <div style={{
             fontFamily: 'var(--font-display)',
             fontSize: '15px',
             color: 'var(--gold-light)',
             marginBottom: '8px',
           }}>
-            Price Tracker
+            Pack Openings
           </div>
           <p style={{
             fontSize: '13px',
@@ -187,9 +184,15 @@ export default function Home() {
             lineHeight: 1.65,
             marginBottom: '16px',
           }}>
-            Weekly price movers, gainers and losers across the full Sorcery catalogue.
+            Watch pack opening videos and see exactly what cards were pulled, with live TCG values.
           </p>
-          <span className="badge badge-ordinary">Coming soon</span>
+          <Link to="/videos" style={{
+            color: 'var(--gold)',
+            fontSize: '13px',
+            textDecoration: 'none',
+          }}>
+            Watch Openings →
+          </Link>
         </div>
 
       </section>
