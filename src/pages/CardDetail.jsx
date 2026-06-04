@@ -26,8 +26,9 @@ export default function CardDetail() {
     async function fetchAll() {
       setLoading(true)
       setNotFound(false)
-      const [{ data, error }, { data: ebayData }, { data: snapData }] = await Promise.all([
+      const [{ data, error }, { data: singleListing }, { data: lotListings }, { data: snapData }] = await Promise.all([
         supabase.from('v_inventory_dashboard').select('*').eq('id', id).single(),
+        // single-card listings
         supabase
           .from('ebay_listings')
           .select('ebay_url, listed_price, shipping_cost')
@@ -36,6 +37,11 @@ export default function CardDetail() {
           .order('listed_price')
           .limit(1)
           .maybeSingle(),
+        // lot listings containing this card
+        supabase
+          .from('ebay_listing_cards')
+          .select('ebay_listings!listing_id(ebay_url, listed_price, shipping_cost, status, card_id)')
+          .eq('card_id', id),
         supabase
           .from('price_snapshots')
           .select('checked_at, tcgplayer_market, tcgplayer_low, ebay_sold_avg')
@@ -45,8 +51,18 @@ export default function CardDetail() {
       if (error || !data) {
         setNotFound(true)
       } else {
+        // Merge single + lot listings, pick lowest price
+        const candidates = []
+        if (singleListing) candidates.push(singleListing)
+        for (const lc of (lotListings ?? [])) {
+          const l = lc.ebay_listings
+          if (l && l.status === 'active' && l.card_id === null)
+            candidates.push({ ebay_url: l.ebay_url, listed_price: l.listed_price, shipping_cost: l.shipping_cost })
+        }
+        candidates.sort((a, b) => (a.listed_price ?? 0) - (b.listed_price ?? 0))
+
         setCard(data)
-        setEbayListing(ebayData ?? null)
+        setEbayListing(candidates[0] ?? null)
         setSnapshots((snapData ?? []).map(s => ({
           date: new Date(s.checked_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
           'TCG Market': s.tcgplayer_market != null ? Number(s.tcgplayer_market) : null,
@@ -265,37 +281,41 @@ export default function CardDetail() {
             </div>
           </div>
 
-          {/* eBay listing */}
-          {ebayListing && (
+          {/* Buy button — eBay listing or TCGPlayer fallback */}
+          {ebayListing ? (
             <div className="panel" style={{ marginTop: '12px', padding: '16px 20px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                <div>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>
-                    Listed on eBay
-                  </div>
-                  <div style={{ fontSize: 20, fontWeight: 600, color: 'var(--gold)' }}>
-                    {usd(ebayListing.listed_price)}
-                    {ebayListing.shipping_cost > 0 && (
-                      <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--text-muted)', marginLeft: 8 }}>
-                        + {usd(ebayListing.shipping_cost)} shipping
-                      </span>
-                    )}
-                  </div>
-                </div>
-                {ebayListing.ebay_url && (
-                  <a
-                    href={ebayListing.ebay_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="btn btn-primary btn-sm"
-                    style={{ whiteSpace: 'nowrap', flexShrink: 0 }}
-                  >
-                    Buy on eBay ↗
-                  </a>
+              <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>
+                Available on eBay
+                {ebayListing.shipping_cost > 0 && (
+                  <span style={{ marginLeft: 6, textTransform: 'none', letterSpacing: 0 }}>
+                    + {usd(ebayListing.shipping_cost)} shipping
+                  </span>
                 )}
               </div>
+              {ebayListing.ebay_url ? (
+                <a
+                  href={ebayListing.ebay_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    background: '#E53935', color: '#fff',
+                    borderRadius: 'var(--radius-sm)',
+                    padding: '10px 0',
+                    textDecoration: 'none',
+                    fontSize: 15, fontWeight: 700,
+                    width: '100%',
+                  }}
+                >
+                  Buy Now — {usd(ebayListing.listed_price)}
+                </a>
+              ) : (
+                <div style={{ fontSize: 20, fontWeight: 600, color: 'var(--gold)' }}>
+                  {usd(ebayListing.listed_price)}
+                </div>
+              )}
             </div>
-          )}
+          ) : null}
 
           {/* Price freshness */}
           {priceFreshness && (

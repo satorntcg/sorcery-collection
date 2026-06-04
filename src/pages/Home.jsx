@@ -33,10 +33,10 @@ export default function Home() {
   }, [])
 
   return (
-    <div style={{ maxWidth: '900px', margin: '0 auto', padding: '48px 24px' }}>
+    <div style={{ maxWidth: '900px', margin: '0 auto', padding: '16px 24px' }}>
 
       {/* Section 1 — Hero */}
-      <section style={{ display: 'flex', alignItems: 'center', gap: 48, flexWrap: 'wrap' }}>
+      <section style={{ display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
 
         {/* Left: text */}
         <div style={{ flex: '1 1 300px' }}>
@@ -45,7 +45,7 @@ export default function Home() {
             color: 'var(--gold)',
             fontSize: '12px',
             letterSpacing: '0.12em',
-            marginBottom: '16px',
+            marginBottom: '8px',
           }}>
             Sorcery: Contested Realm
           </p>
@@ -54,14 +54,14 @@ export default function Home() {
             fontSize: 'clamp(32px, 5vw, 52px)',
             color: 'var(--text-primary)',
             lineHeight: 1.15,
-            marginBottom: '16px',
+            marginBottom: '10px',
           }}>
             Track. Price. Sell.
           </h1>
           <p style={{
             color: 'var(--text-secondary)',
             fontSize: '16px',
-            lineHeight: 1.7,
+            lineHeight: 1.6,
           }}>
             Live TCGPlayer prices, eBay sales data, and pack opening stats — all in one place. Built for Sorcery: Contested Realm players.
           </p>
@@ -121,7 +121,7 @@ export default function Home() {
 
       {/* Section 2 — Feature cards */}
       <section style={{
-        marginTop: '56px',
+        marginTop: '16px',
         display: 'grid',
         gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
         gap: '16px',
@@ -228,7 +228,7 @@ export default function Home() {
 
       {/* Contact strip */}
       <section style={{
-        marginTop: 56,
+        marginTop: 24,
         padding: '28px 32px',
         background: 'var(--bg-card)',
         border: '1px solid var(--border)',
