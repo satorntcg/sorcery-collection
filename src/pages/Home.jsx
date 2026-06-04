@@ -5,17 +5,26 @@ import { supabase } from '../lib/supabase'
 export default function Home() {
   const [cardCount,  setCardCount]  = useState(null)
   const [videoCount, setVideoCount] = useState(null)
+  const [heroCards,  setHeroCards]  = useState([])
 
   useEffect(() => {
     document.title = 'SatornTCG — Sorcery: Contested Realm Companion'
 
     async function fetchStats() {
-      const [countRes, videoRes] = await Promise.all([
+      const [countRes, videoRes, heroRes] = await Promise.all([
         supabase.from('cards').select('*', { count: 'exact', head: true }),
         supabase.from('youtube_openings').select('*', { count: 'exact', head: true }),
+        supabase
+          .from('v_inventory_dashboard')
+          .select('id, name, rarity, image_url, tcgplayer_id')
+          .in('rarity', ['unique', 'elite'])
+          .not('tcgplayer_id', 'is', null)
+          .order('tcgplayer_market', { ascending: false })
+          .limit(5),
       ])
-      if (countRes.count  != null) setCardCount(countRes.count)
-      if (videoRes.count  != null) setVideoCount(videoRes.count)
+      if (countRes.count != null) setCardCount(countRes.count)
+      if (videoRes.count != null) setVideoCount(videoRes.count)
+      setHeroCards(heroRes.data ?? [])
     }
 
     fetchStats()
@@ -25,41 +34,84 @@ export default function Home() {
     <div style={{ maxWidth: '900px', margin: '0 auto', padding: '48px 24px' }}>
 
       {/* Section 1 — Hero */}
-      <section>
-        <p style={{
-          textTransform: 'uppercase',
-          color: 'var(--gold)',
-          fontSize: '12px',
-          letterSpacing: '0.12em',
-          marginBottom: '16px',
-        }}>
-          Sorcery: Contested Realm
-        </p>
-        <h1 style={{
-          fontFamily: 'var(--font-display)',
-          fontSize: 'clamp(32px, 5vw, 52px)',
-          color: 'var(--text-primary)',
-          lineHeight: 1.15,
-          marginBottom: '16px',
-        }}>
-          Your Collection Companion
-        </h1>
-        <p style={{
-          color: 'var(--text-secondary)',
-          fontSize: '16px',
-          maxWidth: '480px',
-          lineHeight: 1.7,
-        }}>
-          Browse card prices, master the rules, and track your collection. Built for Sorcery players.
-        </p>
-        <div style={{ display: 'flex', gap: '12px', marginTop: '32px', flexWrap: 'wrap' }}>
-          <Link to="/cards" className="btn btn-primary">
-            Card Prices
-          </Link>
-          <Link to="/rules" className="btn btn-ghost">
-            Rules Assistant
-          </Link>
+      <section style={{ display: 'flex', alignItems: 'center', gap: 48, flexWrap: 'wrap' }}>
+
+        {/* Left: text */}
+        <div style={{ flex: '1 1 300px' }}>
+          <p style={{
+            textTransform: 'uppercase',
+            color: 'var(--gold)',
+            fontSize: '12px',
+            letterSpacing: '0.12em',
+            marginBottom: '16px',
+          }}>
+            Sorcery: Contested Realm
+          </p>
+          <h1 style={{
+            fontFamily: 'var(--font-display)',
+            fontSize: 'clamp(32px, 5vw, 52px)',
+            color: 'var(--text-primary)',
+            lineHeight: 1.15,
+            marginBottom: '16px',
+          }}>
+            Your Collection Companion
+          </h1>
+          <p style={{
+            color: 'var(--text-secondary)',
+            fontSize: '16px',
+            lineHeight: 1.7,
+          }}>
+            Browse card prices, master the rules, and track your collection. Built for Sorcery players.
+          </p>
+          <div style={{ display: 'flex', gap: '12px', marginTop: '32px', flexWrap: 'wrap' }}>
+            <Link to="/cards" className="btn btn-primary">Card Prices</Link>
+            <Link to="/rules" className="btn btn-ghost">Rules Assistant</Link>
+          </div>
         </div>
+
+        {/* Right: card fan */}
+        {heroCards.length > 0 && (
+          <div style={{ flex: '0 0 auto', position: 'relative', height: 260, width: 260 }}>
+            {heroCards.slice(0, 5).map((card, i) => {
+              const total   = Math.min(heroCards.length, 5)
+              const mid     = (total - 1) / 2
+              const angle   = (i - mid) * 10
+              const xOffset = (i - mid) * 22
+              const imgSrc  = card.image_url || `https://product-images.tcgplayer.com/fit-in/400x558/${card.tcgplayer_id}.jpg`
+              return (
+                <Link
+                  key={card.id}
+                  to={`/cards/${card.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}/${card.id}`}
+                  style={{
+                    position: 'absolute',
+                    top: '50%',
+                    left: '50%',
+                    transform: `translate(calc(-50% + ${xOffset}px), -50%) rotate(${angle}deg)`,
+                    transformOrigin: 'bottom center',
+                    zIndex: i === Math.floor(mid) ? 5 : 4 - Math.abs(i - Math.floor(mid)),
+                    transition: 'transform 0.2s, z-index 0s',
+                    display: 'block',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.transform = `translate(calc(-50% + ${xOffset}px), calc(-50% - 12px)) rotate(${angle}deg) scale(1.06)`; e.currentTarget.style.zIndex = 10 }}
+                  onMouseLeave={e => { e.currentTarget.style.transform = `translate(calc(-50% + ${xOffset}px), -50%) rotate(${angle}deg)`; e.currentTarget.style.zIndex = i === Math.floor(mid) ? 5 : 4 - Math.abs(i - Math.floor(mid)) }}
+                >
+                  <img
+                    src={imgSrc}
+                    alt={card.name}
+                    style={{
+                      width: 120,
+                      borderRadius: 8,
+                      border: '2px solid rgba(201,168,76,0.3)',
+                      boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
+                      display: 'block',
+                    }}
+                  />
+                </Link>
+              )
+            })}
+          </div>
+        )}
+
       </section>
 
       {/* Section 2 — Stats bar */}
