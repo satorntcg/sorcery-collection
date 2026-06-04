@@ -75,7 +75,7 @@ export default function PublicNav({ session }) {
             transition: 'all var(--transition)',
           })}
         >
-          Videos
+          Pack Openings
         </NavLink>
         <NavLink
           to="/contact"
