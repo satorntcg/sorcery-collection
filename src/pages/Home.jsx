@@ -142,7 +142,7 @@ export default function Home() {
           </Link>
         </div>
 
-        {/* Card Database */}
+        {/* Card Prices */}
         <div className="panel" style={{ padding: '24px' }}>
           <div style={{ fontSize: '28px', marginBottom: '12px' }}>🃏</div>
           <div style={{
@@ -151,7 +151,7 @@ export default function Home() {
             color: 'var(--gold-light)',
             marginBottom: '8px',
           }}>
-            Card Database
+            Card Prices
           </div>
           <p style={{
             fontSize: '13px',

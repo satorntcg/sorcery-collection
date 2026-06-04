@@ -47,7 +47,7 @@ export default function PublicNav({ session }) {
             transition: 'all var(--transition)',
           })}
         >
-          Cards
+          Card Prices
         </NavLink>
         <NavLink
           to="/rules"

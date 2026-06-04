@@ -16,7 +16,7 @@ export default function PublicCards() {
   const [ebayMap, setEbayMap] = useState(new Map())
 
   useEffect(() => {
-    document.title = 'Card Database — SatornTCG'
+    document.title = 'Card Prices — SatornTCG'
 
     async function fetchAll() {
       setLoading(true)
@@ -78,7 +78,7 @@ export default function PublicCards() {
 
       {/* Page header */}
       <div className="page-header">
-        <h1 className="page-title">Card Database</h1>
+        <h1 className="page-title">Card Prices</h1>
         <p className="page-subtitle">
           Live TCGPlayer market prices · {loading ? '…' : `${cards.length} cards`}
         </p>
