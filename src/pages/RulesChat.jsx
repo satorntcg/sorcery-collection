@@ -1,112 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 
-const OPENAI_KEY    = import.meta.env.VITE_OPENAI_KEY
-const ANTHROPIC_KEY = import.meta.env.VITE_ANTHROPIC_KEY
-const SUPABASE_URL  = import.meta.env.VITE_SUPABASE_URL
-const SUPABASE_ANON = import.meta.env.VITE_SUPABASE_ANON_KEY
-
-async function getEmbedding(text) {
-  const res = await fetch('https://api.openai.com/v1/embeddings', {
-    method:  'POST',
-    headers: {
-      'Authorization': `Bearer ${OPENAI_KEY}`,
-      'Content-Type':  'application/json',
-    },
-    body: JSON.stringify({ model: 'text-embedding-ada-002', input: text }),
-  })
-  const data = await res.json()
-  if (!data.data) throw new Error('Embedding failed')
-  return data.data[0].embedding
-}
-
-async function fetchChunks(embedding, filterSource, count) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/match_documents`, {
-    method:  'POST',
-    headers: {
-      'Authorization': `Bearer ${SUPABASE_ANON}`,
-      'apikey':        SUPABASE_ANON,
-      'Content-Type':  'application/json',
-    },
-    body: JSON.stringify({
-      query_embedding: embedding,
-      match_threshold: 0.65,
-      match_count:     count,
-      filter_source:   filterSource,
-    }),
-  })
-  return res.json()
-}
-
-async function findChunks(question, mode) {
-  const embedding = await getEmbedding(question)
-  if (mode === 'compare') {
-    const [sorcery, mtg] = await Promise.all([
-      fetchChunks(embedding, 'rulebook',  3),
-      fetchChunks(embedding, 'mtg_guide', 3),
-    ])
-    return { sorcery: sorcery ?? [], mtg: mtg ?? [] }
-  }
-  const source = mode === 'mtg' ? 'mtg_guide' : 'rulebook'
-  const chunks  = await fetchChunks(embedding, source, 5)
-  return { single: chunks ?? [] }
-}
-
-function buildSystemPrompt(mode, chunks) {
-  if (mode === 'compare') {
-    const sCtx = chunks.sorcery.length
-      ? chunks.sorcery.map(c => c.content).join('\n\n---\n\n')
-      : 'No relevant Sorcery rulebook excerpts found.'
-    const mCtx = chunks.mtg.length
-      ? chunks.mtg.map(c => c.content).join('\n\n---\n\n')
-      : 'No relevant MTG comparison guide excerpts found.'
-    return `You are an expert on both Magic: The Gathering and Sorcery: Contested Realm. Using ONLY the excerpts below, compare how this rule or mechanic works in Sorcery versus MTG. First explain the Sorcery rule, then how it compares to MTG. Be clear and concise. Use plain text only — no markdown headers or bullet symbols.
-
-Sorcery rulebook excerpts:
-${sCtx}
-
----
-
-MTG comparison guide excerpts:
-${mCtx}`
-  }
-
-  const context = chunks.single.map(c => c.content).join('\n\n---\n\n')
-
-  if (mode === 'mtg') {
-    return `You are an expert helping Magic: The Gathering players understand Sorcery: Contested Realm. Answer the player's question using ONLY the guide excerpts below. Highlight how mechanics relate to or differ from MTG where relevant. Be clear and concise. Use plain text only — no markdown headers or bullet symbols. If the answer isn't in the excerpts, say so honestly.
-
-MTG-to-Sorcery guide excerpts:
-${context}`
-  }
-
-  return `You are a Sorcery: Contested Realm rules expert. Answer the player's question using ONLY the rulebook excerpts below. Be clear and concise. Use plain text only — no markdown headers or bullet symbols. If the answer isn't in the excerpts, say so honestly and suggest they check the full rulebook.
-
-Rulebook excerpts:
-${context}`
-}
-
-async function askClaude(question, chunks, mode) {
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method:  'POST',
-    headers: {
-      'x-api-key':                                 ANTHROPIC_KEY,
-      'anthropic-version':                         '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true',
-      'Content-Type':                              'application/json',
-    },
-    body: JSON.stringify({
-      model:      'claude-haiku-4-5-20251001',
-      max_tokens: 1024,
-      system:     buildSystemPrompt(mode, chunks),
-      messages:   [{ role: 'user', content: question }],
-    }),
-  })
-  const data = await res.json()
-  if (data.error) throw new Error(data.error.message)
-  return data.content[0].text
-}
-
 const SUGGESTED = {
   sorcery: [
     'How does intercept work?',
@@ -199,11 +93,9 @@ export default function RulesChat() {
         return
       }
 
-      const chunks  = await findChunks(question, mode)
-      const noMatch = mode === 'compare'
-        ? chunks.sorcery.length === 0 && chunks.mtg.length === 0
-        : chunks.single.length === 0
-      if (noMatch) {
+      const { data, error } = await supabase.functions.invoke('rules-ai', { body: { question, mode } })
+      if (error) throw error
+      if (data.noMatch) {
         setMessages(prev => [...prev, {
           role:    'assistant',
           content: "I couldn't find relevant sections for that question. Try rephrasing, or check the official Sorcery rulebook directly.",
@@ -211,9 +103,8 @@ export default function RulesChat() {
         }])
         return
       }
-      const answer = await askClaude(question, chunks, mode)
-      setMessages(prev => [...prev, { role: 'assistant', content: answer, mode }])
-      logQuestion(question, mode, answer)
+      setMessages(prev => [...prev, { role: 'assistant', content: data.answer, mode }])
+      logQuestion(question, mode, data.answer)
       loadFaq(mode).then(setFaqQuestions)
     } catch {
       setMessages(prev => [...prev, {

@@ -92,42 +92,11 @@ function groupCards(cards) {
   return groups
 }
 
-// ── AI title + analysis via Claude API ───────────────────────
+// ── AI title + analysis via Edge Function ────────────────────
 async function getAISuggestions(groups) {
-  const prompt = `You are helping a Sorcery: Contested Realm TCG seller create optimal eBay listing titles and grouping analysis.
-
-Here are the proposed card lots:
-${groups.map((g, i) => `
-Lot ${i + 1} [${g.tier}] — $${g.total.toFixed(2)} total
-Cards: ${g.cards.map(c => `${c.name} (${c.rarity}${c.foil ? ' Foil' : ''}) $${(c.tcgplayer_market || 0).toFixed(2)}`).join(', ')}
-`).join('\n')}
-
-For each lot, provide:
-1. A compelling eBay listing title (max 80 chars) that highlights the best cards
-2. A brief 1-sentence selling note about why this lot is good value
-3. A "synergy score" from 1-5 based on how well the cards go together thematically
-
-Respond ONLY with a JSON array, one object per lot, in order:
-[{"title": "...", "note": "...", "synergy": 3}, ...]`
-
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 1000,
-      messages: [{ role: "user", content: prompt }],
-    }),
-  })
-
-  const data = await response.json()
-  const text = data.content?.[0]?.text ?? '[]'
-  try {
-    const clean = text.replace(/```json|```/g, '').trim()
-    return JSON.parse(clean)
-  } catch {
-    return groups.map(() => ({ title: '', note: '', synergy: 3 }))
-  }
+  const { data, error } = await supabase.functions.invoke('ai-listing-suggestions', { body: { groups } })
+  if (error) throw error
+  return data.suggestions
 }
 
 // ── Create listing ────────────────────────────────────────────
