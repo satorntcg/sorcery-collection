@@ -22,7 +22,7 @@ export default function PublicCards() {
       const [{ data: cardData }, { data: singleData }, { data: lotData }] = await Promise.all([
         supabase
           .from('v_inventory_dashboard')
-          .select('id, name, set_name, rarity, foil, condition, tcgplayer_market, quantity_owned, image_url')
+          .select('id, name, set_name, rarity, foil, condition, tcgplayer_market, quantity_owned, image_url, tcgplayer_id')
           .order('name'),
         // single-card listings
         supabase
@@ -159,8 +159,8 @@ export default function PublicCards() {
                       to={`/cards/${c.id}`}
                       style={{ textDecoration: 'none', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 10 }}
                     >
-                      {c.image_url
-                        ? <img src={c.image_url} alt={c.name} style={{ width: 32, height: 44, objectFit: 'cover', borderRadius: 3, flexShrink: 0 }} />
+                      {(c.image_url || c.tcgplayer_id)
+                        ? <img src={c.image_url || `https://product-images.tcgplayer.com/fit-in/400x558/${c.tcgplayer_id}.jpg`} alt={c.name} style={{ width: 32, height: 44, objectFit: 'cover', borderRadius: 3, flexShrink: 0 }} />
                         : <div style={{ width: 32, height: 44, background: 'var(--bg-raised)', borderRadius: 3, flexShrink: 0 }} />
                       }
                       <span>{c.name}{c.foil ? ' ✦' : ''}</span>
