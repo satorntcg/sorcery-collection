@@ -94,7 +94,11 @@ export default function RulesChat() {
       }
 
       const { data, error } = await supabase.functions.invoke('rules-ai', { body: { question, mode } })
-      if (error) throw new Error(error.message ?? String(error))
+      if (error) {
+        let msg = error.message ?? String(error)
+        try { const b = await error.context?.json(); if (b?.error) msg = b.error } catch {}
+        throw new Error(msg)
+      }
       if (data?.error) throw new Error(data.error)
       if (data.noMatch) {
         setMessages(prev => [...prev, {
