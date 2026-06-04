@@ -100,8 +100,10 @@ export default function Home() {
                     alt={card.name}
                     style={{
                       width: 120,
+                      height: 168,
+                      objectFit: 'cover',
                       borderRadius: 8,
-                      border: '2px solid rgba(201,168,76,0.3)',
+                      border: '2px solid var(--bg-deep)',
                       boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
                       display: 'block',
                     }}

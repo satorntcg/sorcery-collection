@@ -105,6 +105,8 @@ export default function CardDetail() {
               alt={card.name}
               style={{
                 width: '300px',
+                height: '420px',
+                objectFit: 'cover',
                 borderRadius: 'var(--radius-md)',
                 border: '1px solid var(--border)',
                 display: 'block',
