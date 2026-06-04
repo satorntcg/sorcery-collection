@@ -91,8 +91,10 @@ serve(async (req) => {
     })
     const claudeData = await claudeRes.json()
     if (claudeData.error) return ok({ error: `Claude failed: ${claudeData.error.message}` })
+    const answer = claudeData.content?.[0]?.text
+    if (!answer) return ok({ error: `Claude empty response: ${JSON.stringify(claudeData)}` })
 
-    return ok({ answer: claudeData.content[0].text })
+    return ok({ answer })
 
   } catch (e: any) {
     return ok({ error: `Unhandled exception: ${e?.message ?? String(e)}` })

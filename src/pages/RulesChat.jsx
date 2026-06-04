@@ -104,6 +104,7 @@ export default function RulesChat() {
       })
       const data = await fnRes.json()
       if (data?.error) throw new Error(data.error)
+      if (!data?.answer && !data?.noMatch) throw new Error(`Unexpected response: ${JSON.stringify(data)}`)
       if (data.noMatch) {
         setMessages(prev => [...prev, {
           role:    'assistant',
