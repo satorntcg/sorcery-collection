@@ -315,16 +315,22 @@ export default function YouTube() {
   const [packData, setPackData]       = useState([])
   const [packLoading, setPackLoading] = useState(false)
   const [openingMeta, setOpeningMeta] = useState(null)
-  const [editingUrl, setEditingUrl]   = useState(null)  // opening id being edited
-  const [urlDraft, setUrlDraft]       = useState('')
+  const [editingUrl, setEditingUrl]     = useState(null)
+  const [urlDraft, setUrlDraft]         = useState('')
+  const [editingShortsUrl, setEditingShortsUrl] = useState(null)
+  const [shortsDraft, setShortsDraft]   = useState('')
+  const [shortsMap, setShortsMap]       = useState({})
 
   async function load() {
     setLoading(true)
-    const { data } = await supabase
-      .from('v_youtube_opening_summary')
-      .select('*')
-      .order('filmed_at', { ascending: false })
+    const [{ data }, { data: shortsData }] = await Promise.all([
+      supabase.from('v_youtube_opening_summary').select('*').order('filmed_at', { ascending: false }),
+      supabase.from('youtube_openings').select('id, shorts_url'),
+    ])
     setOpenings(data ?? [])
+    const map = {}
+    for (const r of (shortsData ?? [])) map[r.id] = r.shorts_url
+    setShortsMap(map)
     setLoading(false)
   }
 
@@ -408,6 +414,12 @@ export default function YouTube() {
     if (selected === id) loadOpening(id)
   }
 
+  async function saveShortsUrl(id) {
+    await supabase.from('youtube_openings').update({ shorts_url: shortsDraft || null }).eq('id', id)
+    setEditingShortsUrl(null)
+    load()
+  }
+
   return (
     <div className="page">
       <div className="page-header flex-between">
@@ -475,6 +487,7 @@ export default function YouTube() {
                           </div>
                         </div>
                       </div>
+                      {/* YouTube URL */}
                       {editingUrl === o.id ? (
                         <div style={{ marginTop: 8, display: 'flex', gap: 6 }} onClick={e => e.stopPropagation()}>
                           <input
@@ -505,6 +518,41 @@ export default function YouTube() {
                             onClick={() => { setEditingUrl(o.id); setUrlDraft(o.youtube_url ?? '') }}
                           >
                             {o.youtube_url ? 'Edit' : '+ Add URL'}
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Shorts URL */}
+                      {editingShortsUrl === o.id ? (
+                        <div style={{ marginTop: 6, display: 'flex', gap: 6 }} onClick={e => e.stopPropagation()}>
+                          <input
+                            className="form-input"
+                            value={shortsDraft}
+                            onChange={e => setShortsDraft(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') saveShortsUrl(o.id); if (e.key === 'Escape') setEditingShortsUrl(null) }}
+                            placeholder="https://youtube.com/shorts/..."
+                            autoFocus
+                            style={{ fontSize: 11, padding: '4px 8px', flex: 1 }}
+                          />
+                          <button className="btn btn-primary btn-sm" style={{ fontSize: 11 }} onClick={() => saveShortsUrl(o.id)}>Save</button>
+                          <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }} onClick={() => setEditingShortsUrl(null)}>✕</button>
+                        </div>
+                      ) : (
+                        <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 8 }} onClick={e => e.stopPropagation()}>
+                          {shortsMap[o.id] ? (
+                            <a href={shortsMap[o.id]} target="_blank" rel="noreferrer"
+                              style={{ fontSize: 11, color: 'var(--text-muted)', textDecoration: 'none' }}>
+                              ▶ View Short
+                            </a>
+                          ) : (
+                            <span style={{ fontSize: 11, color: 'var(--border-mid)' }}>No Short</span>
+                          )}
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            style={{ fontSize: 10, padding: '2px 6px' }}
+                            onClick={() => { setEditingShortsUrl(o.id); setShortsDraft(shortsMap[o.id] ?? '') }}
+                          >
+                            {shortsMap[o.id] ? 'Edit' : '+ Add Short'}
                           </button>
                         </div>
                       )}

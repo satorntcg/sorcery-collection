@@ -3,17 +3,14 @@ import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
 export default function Home() {
-  const [cardCount,  setCardCount]  = useState(null)
-  const [videoCount, setVideoCount] = useState(null)
-  const [heroCards,  setHeroCards]  = useState([])
+  const [heroCards, setHeroCards] = useState([])
+  const [shorts,    setShorts]    = useState([])
 
   useEffect(() => {
     document.title = 'SatornTCG — Sorcery: Contested Realm Companion'
 
     async function fetchStats() {
-      const [countRes, videoRes, heroRes] = await Promise.all([
-        supabase.from('cards').select('*', { count: 'exact', head: true }),
-        supabase.from('youtube_openings').select('*', { count: 'exact', head: true }),
+      const [heroRes, shortsRes] = await Promise.all([
         supabase
           .from('v_inventory_dashboard')
           .select('id, name, rarity, image_url, tcgplayer_id')
@@ -21,10 +18,15 @@ export default function Home() {
           .not('tcgplayer_id', 'is', null)
           .order('tcgplayer_market', { ascending: false })
           .limit(5),
+        supabase
+          .from('youtube_openings')
+          .select('id, title, shorts_url, filmed_at')
+          .not('shorts_url', 'is', null)
+          .order('filmed_at', { ascending: false })
+          .limit(4),
       ])
-      if (countRes.count != null) setCardCount(countRes.count)
-      if (videoRes.count != null) setVideoCount(videoRes.count)
       setHeroCards(heroRes.data ?? [])
+      setShorts(shortsRes.data ?? [])
     }
 
     fetchStats()
@@ -63,10 +65,6 @@ export default function Home() {
           }}>
             Live TCGPlayer prices, eBay sales data, and pack opening stats — all in one place. Built for Sorcery: Contested Realm players.
           </p>
-          <div style={{ display: 'flex', gap: '12px', marginTop: '32px', flexWrap: 'wrap' }}>
-            <Link to="/cards" className="btn btn-primary">Card Prices</Link>
-            <Link to="/rules" className="btn btn-ghost">Rules Assistant</Link>
-          </div>
         </div>
 
         {/* Right: card fan */}
@@ -121,48 +119,7 @@ export default function Home() {
 
       </section>
 
-      {/* Section 2 — Stats bar */}
-      <section style={{ marginTop: '56px' }}>
-        <div className="panel" style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
-          padding: '20px 32px',
-          gap: '0',
-        }}>
-          {[
-            { value: cardCount,  label: 'Cards Tracked' },
-            { value: videoCount, label: 'Pack Opening Videos' },
-            { value: '✓',        label: 'Live TCG Prices' },
-          ].map((stat, i) => (
-            <div
-              key={i}
-              style={{
-                textAlign: 'center',
-                padding: '8px 16px',
-                borderRight: i < 2 ? '1px solid var(--border)' : 'none',
-              }}
-            >
-              <div style={{
-                color: 'var(--gold)',
-                fontSize: '28px',
-                fontWeight: 600,
-                lineHeight: 1.2,
-              }}>
-                {stat.value != null ? stat.value : '—'}
-              </div>
-              <div style={{
-                color: 'var(--text-muted)',
-                fontSize: '12px',
-                marginTop: '4px',
-              }}>
-                {stat.label}
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Section 3 — Feature cards */}
+      {/* Section 2 — Feature cards */}
       <section style={{
         marginTop: '56px',
         display: 'grid',
@@ -172,89 +129,102 @@ export default function Home() {
 
         {/* Rules Assistant */}
         <div className="panel" style={{ padding: '24px' }}>
-          <div style={{ fontSize: '28px', marginBottom: '12px' }}>⚔️</div>
-          <div style={{
-            fontFamily: 'var(--font-display)',
-            fontSize: '15px',
-            color: 'var(--gold-light)',
-            marginBottom: '8px',
-          }}>
-            Rules Assistant
+          <div style={{ width: 44, height: 44, borderRadius: 10, background: 'linear-gradient(135deg, var(--gold-dim), var(--gold))', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--bg-void)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+              <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+            </svg>
           </div>
-          <p style={{
-            fontSize: '13px',
-            color: 'var(--text-secondary)',
-            lineHeight: 1.65,
-            marginBottom: '16px',
-          }}>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: '15px', color: 'var(--gold-light)', marginBottom: '8px' }}>Rules Assistant</div>
+          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.65, marginBottom: '16px' }}>
             Ask any question about Sorcery rules. Powered by the official rulebook and AI.
           </p>
-          <Link to="/rules" style={{
-            color: 'var(--gold)',
-            fontSize: '13px',
-            textDecoration: 'none',
-          }}>
-            Ask the Assistant →
-          </Link>
+          <Link to="/rules" style={{ color: 'var(--gold)', fontSize: '13px', textDecoration: 'none' }}>Ask the Assistant →</Link>
         </div>
 
         {/* Card Prices */}
         <div className="panel" style={{ padding: '24px' }}>
-          <div style={{ fontSize: '28px', marginBottom: '12px' }}>🃏</div>
-          <div style={{
-            fontFamily: 'var(--font-display)',
-            fontSize: '15px',
-            color: 'var(--gold-light)',
-            marginBottom: '8px',
-          }}>
-            Card Prices
+          <div style={{ width: 44, height: 44, borderRadius: 10, background: 'linear-gradient(135deg, var(--gold-dim), var(--gold))', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--bg-void)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="1" x2="12" y2="23"/>
+              <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+            </svg>
           </div>
-          <p style={{
-            fontSize: '13px',
-            color: 'var(--text-secondary)',
-            lineHeight: 1.65,
-            marginBottom: '16px',
-          }}>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: '15px', color: 'var(--gold-light)', marginBottom: '8px' }}>Card Prices</div>
+          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.65, marginBottom: '16px' }}>
             Browse all cards with live TCGPlayer market prices and in-stock availability.
           </p>
-          <Link to="/cards" style={{
-            color: 'var(--gold)',
-            fontSize: '13px',
-            textDecoration: 'none',
-          }}>
-            View Card Prices →
-          </Link>
+          <Link to="/cards" style={{ color: 'var(--gold)', fontSize: '13px', textDecoration: 'none' }}>View Card Prices →</Link>
         </div>
 
         {/* Pack Openings */}
         <div className="panel" style={{ padding: '24px' }}>
-          <div style={{ fontSize: '28px', marginBottom: '12px' }}>📦</div>
-          <div style={{
-            fontFamily: 'var(--font-display)',
-            fontSize: '15px',
-            color: 'var(--gold-light)',
-            marginBottom: '8px',
-          }}>
-            Pack Openings
+          <div style={{ width: 44, height: 44, borderRadius: 10, background: 'linear-gradient(135deg, var(--gold-dim), var(--gold))', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="var(--bg-void)" stroke="none">
+              <polygon points="5,3 19,12 5,21"/>
+            </svg>
           </div>
-          <p style={{
-            fontSize: '13px',
-            color: 'var(--text-secondary)',
-            lineHeight: 1.65,
-            marginBottom: '16px',
-          }}>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: '15px', color: 'var(--gold-light)', marginBottom: '8px' }}>Pack Openings</div>
+          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.65, marginBottom: '16px' }}>
             Watch pack opening videos and see exactly what cards were pulled, with live TCG values.
           </p>
-          <Link to="/videos" style={{
-            color: 'var(--gold)',
-            fontSize: '13px',
-            textDecoration: 'none',
-          }}>
-            Watch Openings →
-          </Link>
+          <Link to="/videos" style={{ color: 'var(--gold)', fontSize: '13px', textDecoration: 'none' }}>Watch Openings →</Link>
         </div>
 
       </section>
+
+      {/* Section 3 — Latest Shorts */}
+      {shorts.length > 0 && (
+        <section style={{ marginTop: '56px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+            <div style={{ fontFamily: 'var(--font-display)', fontSize: 15, color: 'var(--gold-light)', letterSpacing: '0.04em' }}>Latest Shorts</div>
+            <a href="https://www.youtube.com/@SatornTCG/shorts" target="_blank" rel="noreferrer"
+              style={{ fontSize: 12, color: 'var(--text-muted)', textDecoration: 'none' }}>
+              View all on YouTube ↗
+            </a>
+          </div>
+          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+            {shorts.map(s => {
+              const m   = s.shorts_url?.match(/shorts\/([a-zA-Z0-9_-]{11})/) || s.shorts_url?.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/)
+              const ytId = m?.[1]
+              const thumb = ytId ? `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` : null
+              return (
+                <a key={s.id} href={s.shorts_url} target="_blank" rel="noreferrer"
+                  style={{ textDecoration: 'none', flex: '1 1 140px', maxWidth: 180 }}>
+                  <div style={{
+                    borderRadius: 12, overflow: 'hidden',
+                    border: '1px solid var(--border)',
+                    aspectRatio: '9/16',
+                    background: 'var(--bg-raised)',
+                    position: 'relative',
+                  }}>
+                    {thumb && (
+                      <img src={thumb} alt={s.title}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+                    )}
+                    <div style={{
+                      position: 'absolute', inset: 0,
+                      background: 'linear-gradient(to top, rgba(0,0,0,0.7) 0%, transparent 50%)',
+                      display: 'flex', alignItems: 'flex-end', padding: '10px 10px',
+                    }}>
+                      <div style={{
+                        width: 28, height: 28, borderRadius: '50%', background: '#FF0000',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                      }}>
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="white"><path d="M8 5v14l11-7z"/></svg>
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 6, lineHeight: 1.4 }}>
+                    {s.title}
+                  </div>
+                </a>
+              )
+            })}
+          </div>
+        </section>
+      )}
+
 
       {/* Contact strip */}
       <section style={{
