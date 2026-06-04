@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
-const usd = n => n == null ? '—' : `$${Number(n).toFixed(2)}`
+const usd      = n => n == null ? '—' : `$${Number(n).toFixed(2)}`
+const slugify  = s => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 
 export default function PublicCards() {
   const [cards, setCards]         = useState([])
@@ -156,7 +157,7 @@ export default function PublicCards() {
                 <tr key={c.id}>
                   <td>
                     <Link
-                      to={`/cards/${c.id}`}
+                      to={`/cards/${slugify(c.name)}/${c.id}`}
                       style={{ textDecoration: 'none', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 10 }}
                     >
                       {(c.image_url || c.tcgplayer_id)

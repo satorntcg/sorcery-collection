@@ -13,7 +13,7 @@ const conditionLabel = raw => {
 }
 
 export default function CardDetail() {
-  const { id }    = useParams()
+  const { id } = useParams()
   const navigate  = useNavigate()
   const [card,         setCard]        = useState(null)
   const [ebayListing,  setEbayListing] = useState(null)

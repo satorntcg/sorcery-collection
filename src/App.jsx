@@ -81,7 +81,7 @@ export default function App() {
       <Route element={<PublicLayout session={session} />}>
         <Route path="/"          element={<Home />} />
         <Route path="/cards"     element={<PublicCards />} />
-        <Route path="/cards/:id" element={<CardDetail />} />
+        <Route path="/cards/:slug/:id" element={<CardDetail />} />
         <Route path="/rules"     element={<RulesChat />} />
         <Route path="/contact"   element={<Contact />} />
       </Route>
