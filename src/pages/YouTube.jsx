@@ -315,6 +315,8 @@ export default function YouTube() {
   const [packData, setPackData]       = useState([])
   const [packLoading, setPackLoading] = useState(false)
   const [openingMeta, setOpeningMeta] = useState(null)
+  const [editingUrl, setEditingUrl]   = useState(null)  // opening id being edited
+  const [urlDraft, setUrlDraft]       = useState('')
 
   async function load() {
     setLoading(true)
@@ -397,6 +399,13 @@ export default function YouTube() {
     load()
   }
 
+  async function saveUrl(id) {
+    await supabase.from('youtube_openings').update({ youtube_url: urlDraft || null }).eq('id', id)
+    setEditingUrl(null)
+    load()
+    if (selected === id) loadOpening(id)
+  }
+
   return (
     <div className="page">
       <div className="page-header flex-between">
@@ -464,16 +473,38 @@ export default function YouTube() {
                           </div>
                         </div>
                       </div>
-                      {o.youtube_url && (
-                        <a
-                          href={o.youtube_url}
-                          target="_blank"
-                          rel="noreferrer"
-                          onClick={e => e.stopPropagation()}
-                          style={{ display: 'inline-block', marginTop: 8, fontSize: 11, color: '#FF0000', textDecoration: 'none' }}
-                        >
-                          ▶ Watch on YouTube
-                        </a>
+                      {editingUrl === o.id ? (
+                        <div style={{ marginTop: 8, display: 'flex', gap: 6 }} onClick={e => e.stopPropagation()}>
+                          <input
+                            className="form-input"
+                            value={urlDraft}
+                            onChange={e => setUrlDraft(e.target.value)}
+                            onKeyDown={e => { if (e.key === 'Enter') saveUrl(o.id); if (e.key === 'Escape') setEditingUrl(null) }}
+                            placeholder="https://youtube.com/watch?v=..."
+                            autoFocus
+                            style={{ fontSize: 11, padding: '4px 8px', flex: 1 }}
+                          />
+                          <button className="btn btn-primary btn-sm" style={{ fontSize: 11 }} onClick={() => saveUrl(o.id)}>Save</button>
+                          <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }} onClick={() => setEditingUrl(null)}>✕</button>
+                        </div>
+                      ) : (
+                        <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }} onClick={e => e.stopPropagation()}>
+                          {o.youtube_url ? (
+                            <a href={o.youtube_url} target="_blank" rel="noreferrer"
+                              style={{ fontSize: 11, color: '#FF0000', textDecoration: 'none' }}>
+                              ▶ Watch on YouTube
+                            </a>
+                          ) : (
+                            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>No URL yet</span>
+                          )}
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            style={{ fontSize: 10, padding: '2px 6px' }}
+                            onClick={() => { setEditingUrl(o.id); setUrlDraft(o.youtube_url ?? '') }}
+                          >
+                            {o.youtube_url ? 'Edit' : '+ Add URL'}
+                          </button>
+                        </div>
                       )}
                     </div>
                   </div>
