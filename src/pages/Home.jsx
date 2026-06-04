@@ -54,14 +54,14 @@ export default function Home() {
             lineHeight: 1.15,
             marginBottom: '16px',
           }}>
-            Your Collection Companion
+            Track. Price. Sell.
           </h1>
           <p style={{
             color: 'var(--text-secondary)',
             fontSize: '16px',
             lineHeight: 1.7,
           }}>
-            Browse card prices, master the rules, and track your collection. Built for Sorcery players.
+            Live TCGPlayer prices, eBay sales data, and pack opening stats — all in one place. Built for Sorcery: Contested Realm players.
           </p>
           <div style={{ display: 'flex', gap: '12px', marginTop: '32px', flexWrap: 'wrap' }}>
             <Link to="/cards" className="btn btn-primary">Card Prices</Link>
@@ -71,12 +71,12 @@ export default function Home() {
 
         {/* Right: card fan */}
         {heroCards.length > 0 && (
-          <div style={{ flex: '0 0 auto', position: 'relative', height: 260, width: 260 }}>
+          <div style={{ flex: '0 0 auto', position: 'relative', height: 360, width: 380 }}>
             {heroCards.slice(0, 5).map((card, i) => {
               const total   = Math.min(heroCards.length, 5)
               const mid     = (total - 1) / 2
-              const angle   = (i - mid) * 10
-              const xOffset = (i - mid) * 22
+              const angle   = (i - mid) * 12
+              const xOffset = (i - mid) * 32
               const imgSrc  = card.image_url || `https://product-images.tcgplayer.com/fit-in/400x558/${card.tcgplayer_id}.jpg`
               return (
                 <Link
@@ -92,15 +92,15 @@ export default function Home() {
                     transition: 'transform 0.2s, z-index 0s',
                     display: 'block',
                   }}
-                  onMouseEnter={e => { e.currentTarget.style.transform = `translate(calc(-50% + ${xOffset}px), calc(-50% - 12px)) rotate(${angle}deg) scale(1.06)`; e.currentTarget.style.zIndex = 10 }}
+                  onMouseEnter={e => { e.currentTarget.style.transform = `translate(calc(-50% + ${xOffset}px), calc(-50% - 16px)) rotate(${angle}deg) scale(1.07)`; e.currentTarget.style.zIndex = 10 }}
                   onMouseLeave={e => { e.currentTarget.style.transform = `translate(calc(-50% + ${xOffset}px), -50%) rotate(${angle}deg)`; e.currentTarget.style.zIndex = i === Math.floor(mid) ? 5 : 4 - Math.abs(i - Math.floor(mid)) }}
                 >
                   <div style={{
-                    width: 120, height: 168,
-                    borderRadius: 10,
+                    width: 160, height: 224,
+                    borderRadius: 12,
                     overflow: 'hidden',
                     border: '2px solid var(--bg-deep)',
-                    boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
+                    boxShadow: '0 12px 32px rgba(0,0,0,0.7)',
                   }}>
                     <img
                       src={imgSrc}
