@@ -19,6 +19,7 @@ import Home from './pages/Home'
 import PublicCards from './pages/PublicCards'
 import CardDetail from './pages/CardDetail'
 import Contact from './pages/Contact'
+import PublicVideos from './pages/PublicVideos'
 
 function PublicLayout({ session }) {
   return (
@@ -83,6 +84,7 @@ export default function App() {
         <Route path="/cards"     element={<PublicCards />} />
         <Route path="/cards/:slug/:id" element={<CardDetail />} />
         <Route path="/rules"     element={<RulesChat />} />
+        <Route path="/videos"    element={<PublicVideos />} />
         <Route path="/contact"   element={<Contact />} />
       </Route>
 
