@@ -93,12 +93,16 @@ export default function RulesChat() {
         return
       }
 
-      const { data, error } = await supabase.functions.invoke('rules-ai', { body: { question, mode } })
-      if (error) {
-        let msg = error.message ?? String(error)
-        try { const b = await error.context?.json(); if (b?.error) msg = b.error } catch {}
-        throw new Error(msg)
-      }
+      const { data: { session } } = await supabase.auth.getSession()
+      const fnRes = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/rules-ai`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session?.access_token ?? import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ question, mode }),
+      })
+      const data = await fnRes.json()
       if (data?.error) throw new Error(data.error)
       if (data.noMatch) {
         setMessages(prev => [...prev, {

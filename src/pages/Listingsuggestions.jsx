@@ -94,8 +94,17 @@ function groupCards(cards) {
 
 // ── AI title + analysis via Edge Function ────────────────────
 async function getAISuggestions(groups) {
-  const { data, error } = await supabase.functions.invoke('ai-listing-suggestions', { body: { groups } })
-  if (error) throw error
+  const { data: { session } } = await supabase.auth.getSession()
+  const res = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ai-listing-suggestions`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${session?.access_token ?? import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ groups }),
+  })
+  const data = await res.json()
+  if (data?.error) throw new Error(data.error)
   return data.suggestions
 }
 

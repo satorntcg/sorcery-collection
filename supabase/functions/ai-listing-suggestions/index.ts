@@ -1,28 +1,25 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+function ok(payload: any) {
+  return new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+  })
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
 
-  const authHeader = req.headers.get('Authorization')
-  if (!authHeader) return new Response('Unauthorized', { status: 401, headers: corsHeaders })
+  try {
+    const { groups } = await req.json()
+    if (!groups) return ok({ error: 'Missing groups' })
 
-  const supabase = createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_ANON_KEY')!,
-    { global: { headers: { Authorization: authHeader } } }
-  )
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return new Response('Unauthorized', { status: 401, headers: corsHeaders })
-
-  const { groups } = await req.json()
-
-  const prompt = `You are helping a Sorcery: Contested Realm TCG seller create optimal eBay listing titles and grouping analysis.
+    const prompt = `You are helping a Sorcery: Contested Realm TCG seller create optimal eBay listing titles and grouping analysis.
 
 Here are the proposed card lots:
 ${groups.map((g: any, i: number) => `
@@ -38,31 +35,30 @@ For each lot, provide:
 Respond ONLY with a JSON array, one object per lot, in order:
 [{"title": "...", "note": "...", "synergy": 3}, ...]`
 
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': Deno.env.get('ANTHROPIC_API_KEY')!,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1000,
-      messages: [{ role: 'user', content: prompt }],
-    }),
-  })
-
-  const data = await res.json()
-  const text = data.content?.[0]?.text ?? '[]'
-
-  try {
-    const clean = text.replace(/```json|```/g, '').trim()
-    return new Response(JSON.stringify({ suggestions: JSON.parse(clean) }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': Deno.env.get('ANTHROPIC_API_KEY')!,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 1000,
+        messages: [{ role: 'user', content: prompt }],
+      }),
     })
-  } catch {
-    return new Response(JSON.stringify({ suggestions: groups.map(() => ({ title: '', note: '', synergy: 3 })) }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
+
+    const data = await res.json()
+    if (data.error) return ok({ error: `Claude failed: ${data.error.message}` })
+
+    const text = data.content?.[0]?.text ?? '[]'
+    try {
+      return ok({ suggestions: JSON.parse(text.replace(/```json|```/g, '').trim()) })
+    } catch {
+      return ok({ suggestions: groups.map(() => ({ title: '', note: '', synergy: 3 })) })
+    }
+  } catch (e: any) {
+    return ok({ error: `Unhandled exception: ${e?.message ?? String(e)}` })
   }
 })
