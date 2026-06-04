@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 
 const usd = n => n == null ? '—' : `$${Number(n).toFixed(2)}`
 
@@ -17,6 +18,7 @@ export default function CardDetail() {
   const navigate  = useNavigate()
   const [card,         setCard]        = useState(null)
   const [ebayListing,  setEbayListing] = useState(null)
+  const [snapshots,    setSnapshots]   = useState([])
   const [loading,      setLoading]     = useState(true)
   const [notFound,     setNotFound]    = useState(false)
 
@@ -24,7 +26,7 @@ export default function CardDetail() {
     async function fetchAll() {
       setLoading(true)
       setNotFound(false)
-      const [{ data, error }, { data: ebayData }] = await Promise.all([
+      const [{ data, error }, { data: ebayData }, { data: snapData }] = await Promise.all([
         supabase.from('v_inventory_dashboard').select('*').eq('id', id).single(),
         supabase
           .from('ebay_listings')
@@ -34,12 +36,23 @@ export default function CardDetail() {
           .order('listed_price')
           .limit(1)
           .maybeSingle(),
+        supabase
+          .from('price_snapshots')
+          .select('checked_at, tcgplayer_market, tcgplayer_low, ebay_sold_avg')
+          .eq('card_id', id)
+          .order('checked_at', { ascending: true }),
       ])
       if (error || !data) {
         setNotFound(true)
       } else {
         setCard(data)
         setEbayListing(ebayData ?? null)
+        setSnapshots((snapData ?? []).map(s => ({
+          date: new Date(s.checked_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+          'TCG Market': s.tcgplayer_market != null ? Number(s.tcgplayer_market) : null,
+          'TCG Low':    s.tcgplayer_low    != null ? Number(s.tcgplayer_low)    : null,
+          'eBay Avg':   s.ebay_sold_avg    != null ? Number(s.ebay_sold_avg)    : null,
+        })))
         document.title = `${data.name} · ${data.set_name} — SatornTCG`
       }
       setLoading(false)
@@ -199,6 +212,33 @@ export default function CardDetail() {
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* Price history chart */}
+          <div className="panel" style={{ marginTop: '12px', padding: '16px 20px' }}>
+            <div style={{ textTransform: 'uppercase', fontSize: '11px', letterSpacing: '0.08em', color: 'var(--text-muted)', marginBottom: '12px' }}>
+              Price History
+            </div>
+            {snapshots.length < 2 ? (
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', padding: '24px 0' }}>
+                Price history will appear here as data is collected.
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={180}>
+                <LineChart data={snapshots} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                  <XAxis dataKey="date" tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} />
+                  <YAxis tick={{ fontSize: 10, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} tickFormatter={v => `$${v}`} width={40} />
+                  <Tooltip
+                    contentStyle={{ background: 'var(--bg-raised)', border: '1px solid var(--border)', borderRadius: 6, fontSize: 12 }}
+                    formatter={v => [`$${Number(v).toFixed(2)}`]}
+                  />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  <Line type="monotone" dataKey="TCG Market" stroke="var(--gold)" strokeWidth={2} dot={false} connectNulls />
+                  <Line type="monotone" dataKey="TCG Low"    stroke="var(--text-muted)" strokeWidth={1} dot={false} connectNulls strokeDasharray="4 2" />
+                  <Line type="monotone" dataKey="eBay Avg"   stroke="#7eb8d4" strokeWidth={2} dot={false} connectNulls />
+                </LineChart>
+              </ResponsiveContainer>
+            )}
           </div>
 
           {/* Stock panel */}
