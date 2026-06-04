@@ -18,20 +18,11 @@ const SUGGESTED = {
     'How does combat differ from MTG?',
     'How do spells work differently?',
   ],
-  compare: [
-    'How does combat compare to MTG?',
-    "How does death's door compare to life loss in MTG?",
-    'How does the avatar compare to a planeswalker?',
-    'How do sites compare to lands in MTG?',
-    'How does the mana system compare?',
-    'How does card advantage compare?',
-  ],
 }
 
 const MODE_META = {
-  sorcery: { label: 'Sorcery',   icon: '⚔️', subtitle: 'Ask about abilities, card types, game zones, turn structure — anything.' },
-  mtg:     { label: 'MTG Guide', icon: '🃏', subtitle: 'Answers from the MTG-to-Sorcery guide for players coming from Magic.' },
-  compare: { label: 'Compare',   icon: '⚖️', subtitle: 'Compare how rules and mechanics work in Sorcery versus Magic: The Gathering.' },
+  sorcery: { label: 'Sorcery',   icon: '⚔️' },
+  mtg:     { label: 'MTG Guide', icon: '🃏' },
 }
 
 async function loadFaq(mode) {
@@ -149,49 +140,25 @@ export default function RulesChat() {
 
       {/* Header */}
       <div className="page-header" style={{ marginBottom: 20 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <div style={{
-              width: 36, height: 36,
-              background: 'linear-gradient(135deg, var(--gold-dim), var(--gold))',
-              borderRadius: 'var(--radius-sm)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 18,
-            }}>📖</div>
-            <div>
-              <div className="page-title">Rules Assistant</div>
-              <div className="page-subtitle">Ask any question about Sorcery: Contested Realm rules</div>
-            </div>
-          </div>
-
-          {/* Source toggle */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{
-            display: 'flex', gap: 2,
-            background: 'var(--bg-deep)',
-            border: '1px solid var(--border)',
+            width: 36, height: 36,
+            background: 'linear-gradient(135deg, var(--gold-dim), var(--gold))',
             borderRadius: 'var(--radius-sm)',
-            padding: 3,
-          }}>
-            {(['sorcery', 'mtg', 'compare']).map(m => (
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 18,
+          }}>📖</div>
+          <div>
+            <div className="page-title">Rules Assistant</div>
+            <div className="page-subtitle" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              {mode === 'mtg' ? 'Answers tailored for MTG players' : 'Ask any question about Sorcery: Contested Realm rules'}
               <button
-                key={m}
-                onClick={() => switchMode(m)}
-                style={{
-                  padding:    '5px 14px',
-                  fontSize:   12,
-                  fontWeight: mode === m ? 600 : 400,
-                  color:      mode === m ? 'var(--bg-void)' : 'var(--text-secondary)',
-                  background: mode === m ? 'var(--gold)' : 'transparent',
-                  border:     'none',
-                  borderRadius: 'calc(var(--radius-sm) - 2px)',
-                  cursor:     'pointer',
-                  whiteSpace: 'nowrap',
-                  transition: 'background 0.15s, color 0.15s',
-                }}
+                onClick={() => switchMode(mode === 'mtg' ? 'sorcery' : 'mtg')}
+                style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontSize: 11, color: 'var(--gold)', textDecoration: 'underline' }}
               >
-                {MODE_META[m].label}
+                {mode === 'mtg' ? '← Back to Sorcery rules' : 'Coming from MTG?'}
               </button>
-            ))}
+            </div>
           </div>
         </div>
       </div>
@@ -208,10 +175,10 @@ export default function RulesChat() {
               <div style={{ textAlign: 'center' }}>
                 <div style={{ fontSize: 40, marginBottom: 12, opacity: 0.6 }}>{meta.icon}</div>
                 <div style={{ fontFamily: 'var(--font-display)', fontSize: 16, color: 'var(--gold-light)', letterSpacing: '0.06em', marginBottom: 6 }}>
-                  {mode === 'compare' ? 'Compare Rules' : mode === 'mtg' ? 'MTG Player Guide' : 'Rules Assistant'}
+                  {mode === 'mtg' ? 'MTG Player Guide' : 'Rules Assistant'}
                 </div>
                 <div style={{ fontSize: 13, color: 'var(--text-muted)', maxWidth: 360, lineHeight: 1.6 }}>
-                  {meta.subtitle}
+                  {mode === 'mtg' ? 'Answers from the MTG-to-Sorcery guide for players coming from Magic.' : 'Ask about abilities, card types, game zones, turn structure — anything.'}
                 </div>
               </div>
 
@@ -355,9 +322,8 @@ export default function RulesChat() {
             onChange={e => setInput(e.target.value)}
             onKeyDown={handleKey}
             placeholder={
-              mode === 'compare' ? 'Ask to compare a rule or mechanic… (Enter to send)'
-              : mode === 'mtg'   ? 'Ask how a Sorcery mechanic relates to MTG… (Enter to send)'
-              :                    'Ask a rules question… (Enter to send)'
+              mode === 'mtg' ? 'Ask how a Sorcery mechanic relates to MTG… (Enter to send)'
+                             : 'Ask a rules question… (Enter to send)'
             }
             rows={1}
             style={{
@@ -382,11 +348,9 @@ export default function RulesChat() {
 
       {/* Footer note */}
       <div style={{ marginTop: 10, fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' }}>
-        {mode === 'compare'
-          ? 'Comparing Sorcery rulebook and MTG guide · Always verify with official sources'
-          : mode === 'mtg'
-          ? 'Sourced from the MTG-to-Sorcery comparison guide · Always verify with official sources'
-          : 'Answers sourced from the official Sorcery: Contested Realm rulebook · Always verify with your playgroup'}
+        {mode === 'mtg'
+          ? 'Sourced from the MTG-to-Sorcery guide · Always verify with official sources'
+          : 'Sourced from the official Sorcery rulebook · Always verify with your playgroup'}
       </div>
     </div>
   )
