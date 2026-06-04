@@ -61,7 +61,7 @@ export default function PublicNav({ session }) {
             transition: 'all var(--transition)',
           })}
         >
-          Rules Oracle
+          Rules Assistant
         </NavLink>
         <NavLink
           to="/contact"

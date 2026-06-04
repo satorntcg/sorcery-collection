@@ -60,7 +60,7 @@ export default function Home() {
             Browse Cards
           </Link>
           <Link to="/rules" className="btn btn-ghost">
-            Rules Oracle
+            Rules Assistant
           </Link>
         </div>
       </section>
@@ -114,7 +114,7 @@ export default function Home() {
         gap: '16px',
       }}>
 
-        {/* Rules Oracle */}
+        {/* Rules Assistant */}
         <div className="panel" style={{ padding: '24px' }}>
           <div style={{ fontSize: '28px', marginBottom: '12px' }}>⚔️</div>
           <div style={{
@@ -123,7 +123,7 @@ export default function Home() {
             color: 'var(--gold-light)',
             marginBottom: '8px',
           }}>
-            Rules Oracle
+            Rules Assistant
           </div>
           <p style={{
             fontSize: '13px',
@@ -138,7 +138,7 @@ export default function Home() {
             fontSize: '13px',
             textDecoration: 'none',
           }}>
-            Ask the Oracle →
+            Ask the Assistant →
           </Link>
         </div>
 

@@ -159,7 +159,7 @@ export default function RulesChat() {
               fontSize: 18,
             }}>📖</div>
             <div>
-              <div className="page-title">Rules Oracle</div>
+              <div className="page-title">Rules Assistant</div>
               <div className="page-subtitle">Ask any question about Sorcery: Contested Realm rules</div>
             </div>
           </div>
@@ -208,7 +208,7 @@ export default function RulesChat() {
               <div style={{ textAlign: 'center' }}>
                 <div style={{ fontSize: 40, marginBottom: 12, opacity: 0.6 }}>{meta.icon}</div>
                 <div style={{ fontFamily: 'var(--font-display)', fontSize: 16, color: 'var(--gold-light)', letterSpacing: '0.06em', marginBottom: 6 }}>
-                  {mode === 'compare' ? 'Compare Rules' : mode === 'mtg' ? 'MTG Player Guide' : 'Ask the Oracle'}
+                  {mode === 'compare' ? 'Compare Rules' : mode === 'mtg' ? 'MTG Player Guide' : 'Rules Assistant'}
                 </div>
                 <div style={{ fontSize: 13, color: 'var(--text-muted)', maxWidth: 360, lineHeight: 1.6 }}>
                   {meta.subtitle}
