@@ -95,19 +95,24 @@ export default function Home() {
                   onMouseEnter={e => { e.currentTarget.style.transform = `translate(calc(-50% + ${xOffset}px), calc(-50% - 12px)) rotate(${angle}deg) scale(1.06)`; e.currentTarget.style.zIndex = 10 }}
                   onMouseLeave={e => { e.currentTarget.style.transform = `translate(calc(-50% + ${xOffset}px), -50%) rotate(${angle}deg)`; e.currentTarget.style.zIndex = i === Math.floor(mid) ? 5 : 4 - Math.abs(i - Math.floor(mid)) }}
                 >
-                  <img
-                    src={imgSrc}
-                    alt={card.name}
-                    style={{
-                      width: 120,
-                      height: 168,
-                      objectFit: 'cover',
-                      borderRadius: 8,
-                      border: '2px solid var(--bg-deep)',
-                      boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
-                      display: 'block',
-                    }}
-                  />
+                  <div style={{
+                    width: 120, height: 168,
+                    borderRadius: 10,
+                    overflow: 'hidden',
+                    border: '2px solid var(--bg-deep)',
+                    boxShadow: '0 8px 24px rgba(0,0,0,0.6)',
+                  }}>
+                    <img
+                      src={imgSrc}
+                      alt={card.name}
+                      style={{
+                        width: '100%', height: '100%',
+                        objectFit: 'cover',
+                        transform: 'scale(1.05)',
+                        display: 'block',
+                      }}
+                    />
+                  </div>
                 </Link>
               )
             })}

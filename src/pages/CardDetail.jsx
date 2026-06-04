@@ -100,18 +100,24 @@ export default function CardDetail() {
         {/* LEFT: Image */}
         <div style={{ flexShrink: 0 }}>
           {(card.image_url || card.tcgplayer_id) ? (
-            <img
-              src={card.image_url || `https://product-images.tcgplayer.com/fit-in/400x558/${card.tcgplayer_id}.jpg`}
-              alt={card.name}
-              style={{
-                width: '300px',
-                height: '420px',
-                objectFit: 'cover',
-                borderRadius: 'var(--radius-md)',
-                border: '1px solid var(--border)',
-                display: 'block',
-              }}
-            />
+            <div style={{
+              width: 300, height: 420,
+              borderRadius: 20,
+              overflow: 'hidden',
+              border: '1px solid var(--border)',
+              flexShrink: 0,
+            }}>
+              <img
+                src={card.image_url || `https://product-images.tcgplayer.com/fit-in/400x558/${card.tcgplayer_id}.jpg`}
+                alt={card.name}
+                style={{
+                  width: '100%', height: '100%',
+                  objectFit: 'cover',
+                  transform: 'scale(1.05)',
+                  display: 'block',
+                }}
+              />
+            </div>
           ) : (
             <div style={{
               width: '300px',

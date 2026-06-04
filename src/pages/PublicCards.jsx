@@ -161,7 +161,9 @@ export default function PublicCards() {
                       style={{ textDecoration: 'none', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 10 }}
                     >
                       {(c.image_url || c.tcgplayer_id)
-                        ? <img src={c.image_url || `https://product-images.tcgplayer.com/fit-in/400x558/${c.tcgplayer_id}.jpg`} alt={c.name} style={{ width: 32, height: 44, objectFit: 'cover', borderRadius: 3, flexShrink: 0 }} />
+                        ? <div style={{ width: 32, height: 44, borderRadius: 4, overflow: 'hidden', flexShrink: 0 }}>
+                            <img src={c.image_url || `https://product-images.tcgplayer.com/fit-in/400x558/${c.tcgplayer_id}.jpg`} alt={c.name} style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scale(1.08)', display: 'block' }} />
+                          </div>
                         : <div style={{ width: 32, height: 44, background: 'var(--bg-raised)', borderRadius: 3, flexShrink: 0 }} />
                       }
                       <span>{c.name}{c.foil ? ' ✦' : ''}</span>
