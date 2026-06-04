@@ -157,10 +157,13 @@ export default function PublicCards() {
                   <td>
                     <Link
                       to={`/cards/${c.id}`}
-                      className="name-cell"
-                      style={{ textDecoration: 'none', color: 'var(--text-primary)' }}
+                      style={{ textDecoration: 'none', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 10 }}
                     >
-                      {c.name}{c.foil ? ' ✦' : ''}
+                      {c.image_url
+                        ? <img src={c.image_url} alt={c.name} style={{ width: 32, height: 44, objectFit: 'cover', borderRadius: 3, flexShrink: 0 }} />
+                        : <div style={{ width: 32, height: 44, background: 'var(--bg-raised)', borderRadius: 3, flexShrink: 0 }} />
+                      }
+                      <span>{c.name}{c.foil ? ' ✦' : ''}</span>
                     </Link>
                   </td>
                   <td className="set-cell">{c.set_name}</td>
@@ -186,14 +189,13 @@ export default function PublicCards() {
                   <td style={{ textAlign: 'right' }}>
                     {(() => {
                       const l = ebayMap.get(c.id)
-                      if (!l) return <span className="text-muted">—</span>
-                      if (l.ebay_url) return (
-                        <a href={l.ebay_url} target="_blank" rel="noreferrer"
-                          style={{ fontSize: 12, color: 'var(--gold)', textDecoration: 'none', whiteSpace: 'nowrap' }}>
-                          {usd(l.listed_price)} ↗
+                      if (!l?.ebay_url) return <span className="text-muted">—</span>
+                      return (
+                        <a href={l.ebay_url} target="_blank" rel="noreferrer" className="btn btn-primary"
+                          style={{ fontSize: 11, padding: '4px 10px', whiteSpace: 'nowrap', textDecoration: 'none' }}>
+                          Buy Now {usd(l.listed_price)}
                         </a>
                       )
-                      return <span style={{ fontSize: 12, color: 'var(--gold)', whiteSpace: 'nowrap' }}>{usd(l.listed_price)}</span>
                     })()}
                   </td>
                 </tr>
