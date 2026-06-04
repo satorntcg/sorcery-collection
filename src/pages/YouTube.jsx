@@ -394,6 +394,8 @@ export default function YouTube() {
   }
 
   async function deleteOpening(id) {
+    const opening = openings.find(o => o.id === id)
+    if (!window.confirm(`Delete "${opening?.title ?? 'this opening'}"? This cannot be undone.`)) return
     await supabase.from('youtube_openings').delete().eq('id', id)
     if (selected === id) { setSelected(null); setPackData([]); setOpeningMeta(null) }
     load()
