@@ -86,12 +86,12 @@ export default function CardDetail() {
 
         {/* LEFT: Image */}
         <div style={{ flexShrink: 0 }}>
-          {card.image_url ? (
+          {(card.image_url || card.tcgplayer_id) ? (
             <img
-              src={card.image_url}
+              src={card.image_url || `https://product-images.tcgplayer.com/fit-in/400x558/${card.tcgplayer_id}.jpg`}
               alt={card.name}
               style={{
-                width: '200px',
+                width: '300px',
                 borderRadius: 'var(--radius-md)',
                 border: '1px solid var(--border)',
                 display: 'block',
@@ -99,8 +99,8 @@ export default function CardDetail() {
             />
           ) : (
             <div style={{
-              width: '200px',
-              height: '280px',
+              width: '300px',
+              height: '420px',
               background: 'var(--bg-raised)',
               border: '1px solid var(--border)',
               borderRadius: 'var(--radius-md)',
@@ -112,6 +112,17 @@ export default function CardDetail() {
             }}>
               No image
             </div>
+          )}
+          {card.tcgplayer_id && (
+            <a
+              href={`https://www.tcgplayer.com/product/${card.tcgplayer_id}`}
+              target="_blank"
+              rel="noreferrer"
+              className="btn btn-ghost btn-sm"
+              style={{ display: 'block', textAlign: 'center', marginTop: 10, textDecoration: 'none' }}
+            >
+              View on TCGPlayer ↗
+            </a>
           )}
         </div>
 
@@ -152,41 +163,39 @@ export default function CardDetail() {
 
           {/* Prices panel */}
           <div className="panel" style={{ marginTop: '24px', padding: '16px 20px' }}>
-            <div style={{
-              textTransform: 'uppercase',
-              fontSize: '11px',
-              letterSpacing: '0.08em',
-              color: 'var(--text-muted)',
-              marginBottom: '12px',
-            }}>
-              Prices
+            <div style={{ textTransform: 'uppercase', fontSize: '11px', letterSpacing: '0.08em', color: 'var(--text-muted)', marginBottom: '12px' }}>
+              TCGPlayer
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
-              {/* TCG Market */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginBottom: '20px' }}>
               <div>
-                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>
-                  TCG Market
-                </div>
-                <div style={{ fontSize: '20px', fontWeight: 600, color: 'var(--gold)' }}>
-                  {usd(card.tcgplayer_market)}
-                </div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Market</div>
+                <div style={{ fontSize: '20px', fontWeight: 600, color: 'var(--gold)' }}>{usd(card.tcgplayer_market)}</div>
               </div>
-              {/* TCG Low */}
               <div>
-                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>
-                  TCG Low
-                </div>
-                <div style={{ fontSize: '18px', fontWeight: 500, color: 'var(--text-primary)' }}>
-                  {usd(card.tcgplayer_low)}
-                </div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Mid</div>
+                <div style={{ fontSize: '18px', fontWeight: 500, color: 'var(--text-primary)' }}>{usd(card.tcgplayer_mid)}</div>
               </div>
-              {/* eBay Sold Avg */}
               <div>
-                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>
-                  eBay Sold Avg
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Low</div>
+                <div style={{ fontSize: '18px', fontWeight: 500, color: 'var(--text-primary)' }}>{usd(card.tcgplayer_low)}</div>
+              </div>
+            </div>
+            <div style={{ borderTop: '1px solid var(--border)', paddingTop: '16px' }}>
+              <div style={{ textTransform: 'uppercase', fontSize: '11px', letterSpacing: '0.08em', color: 'var(--text-muted)', marginBottom: '12px' }}>
+                eBay Sold
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
+                <div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Avg</div>
+                  <div style={{ fontSize: '18px', fontWeight: 500, color: 'var(--text-primary)' }}>{usd(card.ebay_sold_avg)}</div>
                 </div>
-                <div style={{ fontSize: '18px', fontWeight: 500, color: 'var(--text-primary)' }}>
-                  {usd(card.ebay_sold_avg)}
+                <div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Low</div>
+                  <div style={{ fontSize: '18px', fontWeight: 500, color: 'var(--text-primary)' }}>{usd(card.ebay_sold_low)}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>High</div>
+                  <div style={{ fontSize: '18px', fontWeight: 500, color: 'var(--text-primary)' }}>{usd(card.ebay_sold_high)}</div>
                 </div>
               </div>
             </div>
