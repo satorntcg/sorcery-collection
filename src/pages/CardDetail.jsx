@@ -19,6 +19,7 @@ export default function CardDetail() {
   const [card,         setCard]        = useState(null)
   const [ebayListing,  setEbayListing] = useState(null)
   const [snapshots,    setSnapshots]   = useState([])
+  const [priceChange,  setPriceChange] = useState(null)
   const [loading,      setLoading]     = useState(true)
   const [notFound,     setNotFound]    = useState(false)
 
@@ -26,7 +27,7 @@ export default function CardDetail() {
     async function fetchAll() {
       setLoading(true)
       setNotFound(false)
-      const [{ data, error }, { data: singleListing }, { data: lotListings }, { data: snapData }] = await Promise.all([
+      const [{ data, error }, { data: singleListing }, { data: lotListings }, { data: snapData }, { data: changeData }] = await Promise.all([
         supabase.from('v_inventory_dashboard').select('*').eq('id', id).single(),
         // single-card listings
         supabase
@@ -47,6 +48,7 @@ export default function CardDetail() {
           .select('checked_at, tcgplayer_market, tcgplayer_low, ebay_sold_avg')
           .eq('card_id', id)
           .order('checked_at', { ascending: true }),
+        supabase.from('v_price_gainers_losers').select('current_price, price_7d_ago').eq('card_id', id).maybeSingle(),
       ])
       if (error || !data) {
         setNotFound(true)
@@ -63,6 +65,10 @@ export default function CardDetail() {
 
         setCard(data)
         setEbayListing(candidates[0] ?? null)
+        if (changeData) {
+          const ch = Number(changeData.current_price) - Number(changeData.price_7d_ago)
+          setPriceChange(Math.abs(ch) >= 0.05 ? ch : null)
+        }
         setSnapshots((snapData ?? []).map(s => ({
           date: new Date(s.checked_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
           'TCG Market': s.tcgplayer_market != null ? Number(s.tcgplayer_market) : null,
@@ -187,7 +193,14 @@ export default function CardDetail() {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginBottom: '20px' }}>
               <div>
                 <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Market</div>
-                <div style={{ fontSize: '20px', fontWeight: 600, color: 'var(--gold)' }}>{usd(card.tcgplayer_market)}</div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '20px', fontWeight: 600, color: 'var(--gold)' }}>{usd(card.tcgplayer_market)}</span>
+                  {priceChange != null && (
+                    <span style={{ fontSize: 11, color: priceChange > 0 ? 'var(--success)' : 'var(--danger)', whiteSpace: 'nowrap' }}>
+                      {priceChange > 0 ? '▲' : '▼'} ${Math.abs(priceChange).toFixed(2)}
+                    </span>
+                  )}
+                </div>
               </div>
               <div>
                 <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Mid</div>
