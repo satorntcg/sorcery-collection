@@ -91,13 +91,13 @@ export default function PublicCards() {
           placeholder="Search cards…"
           value={search}
           onChange={e => setSearch(e.target.value)}
-          style={{ width: '240px' }}
+          style={{ width: '100%', maxWidth: '240px', minWidth: '140px' }}
         />
         <select
           className="form-select"
           value={rarityFilter}
           onChange={e => setRarity(e.target.value)}
-          style={{ width: '150px' }}
+          style={{ flex: '1 1 120px', maxWidth: '150px' }}
         >
           <option value="all">All Rarities</option>
           <option value="ordinary">Ordinary</option>
@@ -109,7 +109,7 @@ export default function PublicCards() {
           className="form-select"
           value={setFilter}
           onChange={e => setSetFilter(e.target.value)}
-          style={{ width: '180px' }}
+          style={{ flex: '1 1 140px', maxWidth: '180px' }}
         >
           <option value="all">All Sets</option>
           {sets.map(s => (
@@ -140,8 +140,8 @@ export default function PublicCards() {
       ) : filtered.length === 0 ? (
         <div className="empty-state" style={{ marginTop: '40px' }}>No cards match your filters.</div>
       ) : (
-        <div className="panel" style={{ marginTop: '12px' }}>
-          <table className="data-table">
+        <div className="panel" style={{ marginTop: '12px', overflowX: 'auto' }}>
+          <table className="data-table" style={{ minWidth: 560 }}>
             <thead>
               <tr>
                 <th>Card</th>

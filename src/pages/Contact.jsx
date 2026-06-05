@@ -74,7 +74,7 @@ export default function Contact() {
         <div className="panel" style={{ padding: '28px 24px' }}>
           <form onSubmit={handleSubmit}>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 16 }}>
               <div>
                 <label className="form-label">Name</label>
                 <input

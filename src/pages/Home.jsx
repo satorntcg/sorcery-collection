@@ -69,7 +69,7 @@ export default function Home() {
 
         {/* Right: card fan */}
         {heroCards.length > 0 && (
-          <div style={{ flex: '0 0 auto', position: 'relative', height: 360, width: 380 }}>
+          <div style={{ flex: '0 0 auto', position: 'relative', height: 360, width: 380, maxWidth: '100%' }}>
             {heroCards.slice(0, 5).map((card, i) => {
               const total   = Math.min(heroCards.length, 5)
               const mid     = (total - 1) / 2

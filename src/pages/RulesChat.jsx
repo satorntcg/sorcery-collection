@@ -21,8 +21,8 @@ const SUGGESTED = {
 }
 
 const MODE_META = {
-  sorcery: { label: 'Sorcery',   icon: '⚔️' },
-  mtg:     { label: 'MTG Guide', icon: '🃏' },
+  sorcery: { label: 'Sorcery',   icon: '📖' },
+  mtg:     { label: 'MTG Guide', icon: '📖' },
 }
 
 async function loadFaq(mode) {
@@ -171,56 +171,21 @@ export default function RulesChat() {
 
           {/* Empty state */}
           {isEmpty && (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 24 }}>
-              <div style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: 40, marginBottom: 12, opacity: 0.6 }}>{meta.icon}</div>
-                <div style={{ fontFamily: 'var(--font-display)', fontSize: 16, color: 'var(--gold-light)', letterSpacing: '0.06em', marginBottom: 6 }}>
-                  {mode === 'mtg' ? 'MTG Player Guide' : 'Rules Assistant'}
-                </div>
-                <div style={{ fontSize: 13, color: 'var(--text-muted)', maxWidth: 360, lineHeight: 1.6 }}>
-                  {mode === 'mtg' ? 'Answers from the MTG-to-Sorcery guide for players coming from Magic.' : 'Ask about abilities, card types, game zones, turn structure — anything.'}
-                </div>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 16 }}>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                {faqQuestions.length > 0 ? 'Most Asked' : 'Try asking'}
               </div>
-
-              {/* FAQ questions */}
-              {faqQuestions.length > 0 && (
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, width: '100%', maxWidth: 560 }}>
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Most Asked</div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
-                    {faqQuestions.map(r => (
-                      <button
-                        key={r.question}
-                        className="btn btn-ghost btn-sm"
-                        onClick={() => sendMessage(r.question)}
-                        style={{ fontSize: 12, borderColor: 'var(--border-mid)', display: 'flex', alignItems: 'center', gap: 6 }}
-                      >
-                        {r.question}
-                        {r.count > 1 && (
-                          <span style={{ fontSize: 10, color: 'var(--text-muted)', background: 'var(--bg-deep)', borderRadius: 8, padding: '1px 5px' }}>
-                            {r.count}
-                          </span>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Suggested questions */}
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, width: '100%', maxWidth: 560 }}>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Suggested</div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
-                  {SUGGESTED[mode].map(q => (
-                    <button
-                      key={q}
-                      className="btn btn-ghost btn-sm"
-                      onClick={() => sendMessage(q)}
-                      style={{ fontSize: 12, borderColor: 'var(--border-mid)' }}
-                    >
-                      {q}
-                    </button>
-                  ))}
-                </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center', maxWidth: 580 }}>
+                {(faqQuestions.length > 0 ? faqQuestions.map(r => r.question) : SUGGESTED[mode]).map(q => (
+                  <button
+                    key={q}
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => sendMessage(q)}
+                    style={{ fontSize: 12, borderColor: 'var(--border-mid)' }}
+                  >
+                    {q}
+                  </button>
+                ))}
               </div>
             </div>
           )}

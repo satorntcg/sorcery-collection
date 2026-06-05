@@ -57,7 +57,7 @@ export default function PublicVideos() {
 
       {/* Stats bar */}
       {!loading && videos.length > 0 && (
-        <div className="panel" style={{ display: 'flex', gap: 0, marginTop: 20, padding: '16px 24px' }}>
+        <div className="panel" style={{ display: 'flex', flexWrap: 'wrap', gap: 0, marginTop: 20, padding: '16px 24px' }}>
           {[
             { label: 'Videos',      value: videos.length },
             { label: 'Packs Opened', value: totalPacks },
@@ -83,7 +83,7 @@ export default function PublicVideos() {
       ) : (
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
           gap: 20,
           marginTop: 20,
         }}>

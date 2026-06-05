@@ -130,7 +130,7 @@ export default function CardDetail() {
         <div style={{ flexShrink: 0 }}>
           {(card.image_url || card.tcgplayer_id) ? (
             <div style={{
-              width: 300, height: 420,
+              width: 'min(300px, 100%)', height: 'auto', aspectRatio: '5/7',
               borderRadius: 20,
               overflow: 'hidden',
               border: '1px solid var(--border)',
