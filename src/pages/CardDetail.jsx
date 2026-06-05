@@ -286,11 +286,7 @@ export default function CardDetail() {
             <div className="panel" style={{ marginTop: '12px', padding: '16px 20px' }}>
               <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 10 }}>
                 Available on eBay
-                {ebayListing.shipping_cost > 0 && (
-                  <span style={{ marginLeft: 6, textTransform: 'none', letterSpacing: 0 }}>
-                    + {usd(ebayListing.shipping_cost)} shipping
-                  </span>
-                )}
+                <span style={{ marginLeft: 6, textTransform: 'none', letterSpacing: 0 }}>· Free shipping</span>
               </div>
               {ebayListing.ebay_url ? (
                 <a

@@ -16,14 +16,16 @@ function SummaryCard({ opening, packs }) {
 
   const packBreakdown = packs.map(pack => ({
     number: pack.pack_number,
-    value:  pack.cards.reduce((s, c) => s + (c.tcgplayer_market ?? 0) * c.quantity, 0) + 1.00,
+    value:  pack.cards.reduce((s, c) => s + (c.tcgplayer_market ?? 0) * c.quantity, 0),
     cards:  pack.cards,
   }))
 
-  const totalValue = packBreakdown.reduce((s, p) => s + p.value, 0)
-  const totalCost  = packs.length * (opening.pack_msrp ?? 5)
-  const pnl        = totalValue - totalCost
-  const evPerPack  = packs.length > 0 ? totalValue / packs.length : 0
+  const trackedValue = packBreakdown.reduce((s, p) => s + p.value, 0)
+  const ordinaryEst  = packs.length * 1.00
+  const totalValue   = trackedValue + ordinaryEst
+  const totalCost    = packs.length * (opening.pack_msrp ?? 5)
+  const pnl          = totalValue - totalCost
+  const evPerPack    = packs.length > 0 ? totalValue / packs.length : 0
   const projBox    = evPerPack * (opening.pack_count ?? 36)
   const projBoxPnl = projBox - (opening.box_cost ?? 0)
   const boxLabel   = opening.box_name ?? opening.set_name ?? 'Unknown Box'
@@ -59,7 +61,7 @@ function SummaryCard({ opening, packs }) {
         </div>
 
         {/* Main metrics */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 6 }}>
           {[
             { label: 'Total value', value: usd(totalValue), color: 'var(--gold-light)' },
             { label: 'Cost', value: usd(totalCost), color: 'var(--text-secondary)' },
@@ -70,6 +72,9 @@ function SummaryCard({ opening, packs }) {
               <div style={{ fontSize: 22, fontWeight: 300, color }}>{value}</div>
             </div>
           ))}
+        </div>
+        <div style={{ fontSize: 10, color: 'var(--text-muted)', textAlign: 'right', marginBottom: 12 }}>
+          Includes {usd(ordinaryEst)} ordinary card est. ({packs.length} × $1.00)
         </div>
 
         {/* Box projection */}
@@ -583,7 +588,7 @@ export default function YouTube() {
                     </span>
                   </div>
                   {packData.map(pack => {
-                    const packValue = pack.cards.reduce((s, c) => s + (c.tcgplayer_market ?? 0) * c.quantity, 0) + 1.00
+                    const packValue = pack.cards.reduce((s, c) => s + (c.tcgplayer_market ?? 0) * c.quantity, 0)
                     const packCost  = openingMeta?.pack_msrp ?? 5
                     const isProfit  = packValue >= packCost
                     return (

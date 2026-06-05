@@ -52,17 +52,63 @@ export default function Market() {
   useEffect(() => {
     if (!selected) return
     async function loadHistory() {
-      const { data } = await supabase
-        .from('price_snapshots')
-        .select('tcgplayer_market, ebay_sold_avg, checked_at')
-        .eq('card_id', selected)
-        .order('checked_at', { ascending: true })
-        .limit(60)
-      setHistory(data?.map(d => ({
-        date:      dateShort(d.checked_at),
-        TCGPlayer: d.tcgplayer_market ? Number(d.tcgplayer_market) : null,
-        eBay:      d.ebay_sold_avg    ? Number(d.ebay_sold_avg)    : null,
-      })) ?? [])
+      const [{ data: snapData }, { data: myListingsData }, { data: lotData }] = await Promise.all([
+        supabase
+          .from('price_snapshots')
+          .select('tcgplayer_market, ebay_sold_avg, checked_at')
+          .eq('card_id', selected)
+          .order('checked_at', { ascending: true })
+          .limit(60),
+        // all single-card listings (active + sold)
+        supabase
+          .from('ebay_listings')
+          .select('listed_price, sold_price, sold_at, listed_at, status')
+          .eq('card_id', selected)
+          .in('status', ['active', 'sold'])
+          .order('listed_at', { ascending: true }),
+        // all lot cards (active + sold) — use per-card price from junction
+        supabase
+          .from('ebay_listing_cards')
+          .select('price, ebay_listings!listing_id(listed_at, sold_at, status)')
+          .eq('card_id', selected),
+      ])
+
+      // flatten all own listings into { price, date } — sold uses sold_price/sold_at, active uses listed_price/listed_at
+      const myPoints = [
+        ...(myListingsData ?? []).map(l => ({
+          price: l.status === 'sold' && l.sold_price != null ? Number(l.sold_price) : Number(l.listed_price),
+          date:  (l.status === 'sold' && l.sold_at ? l.sold_at : l.listed_at)?.slice(0, 10),
+        })),
+        ...(lotData ?? [])
+          .filter(lc => lc.ebay_listings?.listed_at && lc.price != null && ['active', 'sold'].includes(lc.ebay_listings.status))
+          .map(lc => ({
+            price: Number(lc.price),
+            date:  (lc.ebay_listings.status === 'sold' && lc.ebay_listings.sold_at
+              ? lc.ebay_listings.sold_at : lc.ebay_listings.listed_at).slice(0, 10),
+          })),
+      ].filter(p => p.date && !isNaN(p.price))
+
+      const entries = new Map()
+      for (const s of (snapData ?? [])) {
+        const key = s.checked_at.slice(0, 10)
+        entries.set(key, {
+          rawDate:  key,
+          date:     dateShort(s.checked_at),
+          TCGPlayer: s.tcgplayer_market != null ? Number(s.tcgplayer_market) : null,
+          eBay:      s.ebay_sold_avg    != null ? Number(s.ebay_sold_avg)    : null,
+          'My eBay': null,
+        })
+      }
+      for (const p of myPoints) {
+        const existing = entries.get(p.date) ?? { rawDate: p.date, date: dateShort(p.date), TCGPlayer: null, eBay: null }
+        entries.set(p.date, { ...existing, 'My eBay': p.price })
+      }
+
+      setHistory(
+        [...entries.values()]
+          .sort((a, b) => a.rawDate.localeCompare(b.rawDate))
+          .map(({ rawDate, ...rest }) => rest)
+      )
     }
     loadHistory()
   }, [selected])
@@ -269,7 +315,7 @@ export default function Market() {
               <div className="panel">
                 <div className="panel-header">
                   <span className="panel-title">Price history</span>
-                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Last {history.length} checks</span>
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Last {history.length} data points</span>
                 </div>
                 <div style={{ padding: '20px', height: 280 }}>
                   {history.length < 2 ? (
@@ -288,7 +334,14 @@ export default function Market() {
                         />
                         <Legend wrapperStyle={{ fontSize: 12, color: 'var(--text-muted)' }} />
                         <Line type="monotone" dataKey="TCGPlayer" stroke="#C9A84C" strokeWidth={2} dot={false} connectNulls />
-                        <Line type="monotone" dataKey="eBay" stroke="#4C84C9" strokeWidth={2} dot={false} connectNulls />
+                        <Line type="monotone" dataKey="eBay"      stroke="#4C84C9" strokeWidth={2} dot={false} connectNulls />
+                        <Line type="monotone" dataKey="My eBay"   stroke="#4CAF6E" strokeWidth={0} connectNulls
+                          dot={(props) => {
+                            const { cx, cy, value } = props
+                            if (value == null) return null
+                            return <circle key={`me-${cx}-${cy}`} cx={cx} cy={cy} r={5} fill="#4CAF6E" stroke="var(--bg-raised)" strokeWidth={2} />
+                          }}
+                        />
                       </LineChart>
                     </ResponsiveContainer>
                   )}

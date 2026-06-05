@@ -20,6 +20,7 @@ import PublicCards from './pages/PublicCards'
 import CardDetail from './pages/CardDetail'
 import Contact from './pages/Contact'
 import PublicVideos from './pages/PublicVideos'
+import BoxEV from './pages/BoxEV'
 
 function PublicLayout({ session }) {
   return (
@@ -110,6 +111,7 @@ export default function App() {
           <Route path="/import"      element={<Import />} />
           <Route path="/settings"    element={<Settings />} />
           <Route path="/suggestions" element={<ListingSuggestions />} />
+          <Route path="/boxev"       element={<BoxEV />} />
           <Route path="*"            element={<Navigate to="/dashboard" replace />} />
         </Route>
       </Route>
