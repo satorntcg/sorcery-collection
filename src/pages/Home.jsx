@@ -1,20 +1,18 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import WeeklyMovers from '../components/Weeklymovers'
 
-const usd     = n => n == null ? '—' : `$${Number(n).toFixed(2)}`
-const slugify = s => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 
 export default function Home() {
   const [heroCards, setHeroCards] = useState([])
   const [shorts,    setShorts]    = useState([])
-  const [movers,    setMovers]    = useState({ gainers: [], losers: [] })
 
   useEffect(() => {
     document.title = 'SatornTCG — Sorcery: Contested Realm Companion'
 
     async function fetchStats() {
-      const [heroRes, shortsRes, gainersRes, losersRes] = await Promise.all([
+      const [heroRes, shortsRes] = await Promise.all([
         supabase
           .from('v_inventory_dashboard')
           .select('id, name, rarity, image_url, tcgplayer_id')
@@ -28,30 +26,9 @@ export default function Home() {
           .not('shorts_url', 'is', null)
           .order('filmed_at', { ascending: false })
           .limit(4),
-        supabase
-          .from('v_price_gainers_losers')
-          .select('card_id, name, rarity, foil, current_price, pct_change')
-          .gt('pct_change', 0)
-          .order('pct_change', { ascending: false })
-          .limit(10),
-        supabase
-          .from('v_price_gainers_losers')
-          .select('card_id, name, rarity, foil, current_price, pct_change')
-          .lt('pct_change', 0)
-          .order('pct_change', { ascending: true })
-          .limit(10),
       ])
       setHeroCards(heroRes.data ?? [])
       setShorts(shortsRes.data ?? [])
-      // sort by dollar impact (price × |pct|) so high-value movers float up
-      const byDollar = arr => [...(arr ?? [])].sort((a, b) =>
-        Math.abs(Number(b.current_price) * Number(b.pct_change)) -
-        Math.abs(Number(a.current_price) * Number(a.pct_change))
-      )
-      setMovers({
-        gainers: byDollar(gainersRes.data).slice(0, 3),
-        losers:  byDollar(losersRes.data).slice(0, 3),
-      })
     }
 
     fetchStats()
@@ -199,87 +176,9 @@ export default function Home() {
       </section>
 
       {/* Section 3 — This Week's Movers */}
-      {(movers.gainers.length > 0 || movers.losers.length > 0) && (
-        <section style={{ marginTop: 56 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-            <div style={{ fontFamily: 'var(--font-display)', fontSize: 15, color: 'var(--gold-light)', letterSpacing: '0.04em' }}>
-              This Week's Movers
-            </div>
-            <Link to="/cards" style={{ fontSize: 12, color: 'var(--text-muted)', textDecoration: 'none' }}>
-              View all movers →
-            </Link>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-
-            {/* Gainers */}
-            <div>
-              <div style={{ fontSize: 10, color: 'var(--success)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 10 }}>▲ Top Gainers</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {movers.gainers.map(c => (
-                  <Link key={c.card_id} to={`/cards/${slugify(c.name)}/${c.card_id}`}
-                    style={{ textDecoration: 'none' }}>
-                    <div
-                      style={{
-                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                        padding: '10px 14px', cursor: 'pointer',
-                        background: 'var(--bg-card)', border: '1px solid var(--border)',
-                        borderRadius: 'var(--radius-sm)', transition: 'border-color 0.15s',
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--gold-dim)'}
-                      onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
-                    >
-                      <div style={{ minWidth: 0 }}>
-                        <span style={{ fontSize: 13, color: 'var(--text-primary)', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {c.name}{c.foil ? ' ✦' : ''}
-                        </span>
-                        <span className={`badge badge-${c.rarity}`} style={{ marginTop: 3 }}>{c.rarity}</span>
-                      </div>
-                      <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: 12 }}>
-                        <div style={{ fontSize: 13, color: 'var(--gold)', fontWeight: 600 }}>{usd(c.current_price)}</div>
-                        <div style={{ fontSize: 11, color: 'var(--success)' }}>+{Number(c.pct_change).toFixed(1)}%</div>
-                      </div>
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            </div>
-
-            {/* Losers */}
-            <div>
-              <div style={{ fontSize: 10, color: 'var(--danger)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 10 }}>▼ Top Losers</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {movers.losers.map(c => (
-                  <Link key={c.card_id} to={`/cards/${slugify(c.name)}/${c.card_id}`}
-                    style={{ textDecoration: 'none' }}>
-                    <div
-                      style={{
-                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                        padding: '10px 14px', cursor: 'pointer',
-                        background: 'var(--bg-card)', border: '1px solid var(--border)',
-                        borderRadius: 'var(--radius-sm)', transition: 'border-color 0.15s',
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--gold-dim)'}
-                      onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
-                    >
-                      <div style={{ minWidth: 0 }}>
-                        <span style={{ fontSize: 13, color: 'var(--text-primary)', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {c.name}{c.foil ? ' ✦' : ''}
-                        </span>
-                        <span className={`badge badge-${c.rarity}`} style={{ marginTop: 3 }}>{c.rarity}</span>
-                      </div>
-                      <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: 12 }}>
-                        <div style={{ fontSize: 13, color: 'var(--gold)', fontWeight: 600 }}>{usd(c.current_price)}</div>
-                        <div style={{ fontSize: 11, color: 'var(--danger)' }}>{Number(c.pct_change).toFixed(1)}%</div>
-                      </div>
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            </div>
-
-          </div>
-        </section>
-      )}
+      <section style={{ marginTop: 40 }}>
+        <WeeklyMovers publicLinks />
+      </section>
 
       {/* Section 4 — Latest Shorts */}
       {shorts.length > 0 && (

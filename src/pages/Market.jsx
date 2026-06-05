@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts'
+import WeeklyMovers from '../components/Weeklymovers'
 
 const usd       = (n) => n != null ? `$${Number(n).toFixed(2)}` : '—'
 const dateShort = (d) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''
@@ -137,6 +138,8 @@ export default function Market() {
           </div>
         </div>
       )}
+
+      <WeeklyMovers />
 
       <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 16 }}>
         {/* Card list */}

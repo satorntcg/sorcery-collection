@@ -253,7 +253,13 @@ export default function CardDetail() {
                   <Legend wrapperStyle={{ fontSize: 11 }} />
                   <Line type="monotone" dataKey="TCG Market" stroke="var(--gold)" strokeWidth={2} dot={false} connectNulls />
                   <Line type="monotone" dataKey="TCG Low"    stroke="var(--text-muted)" strokeWidth={1} dot={false} connectNulls strokeDasharray="4 2" />
-                  <Line type="monotone" dataKey="eBay Avg"   stroke="#7eb8d4" strokeWidth={2} dot={false} connectNulls />
+                  <Line type="monotone" dataKey="eBay Avg"   stroke="#7eb8d4" strokeWidth={2} connectNulls
+                    dot={(props) => {
+                      const { cx, cy, value } = props
+                      if (value == null) return null
+                      return <circle key={`ebay-dot-${cx}-${cy}`} cx={cx} cy={cy} r={3} fill="#7eb8d4" stroke="none" />
+                    }}
+                  />
                 </LineChart>
               </ResponsiveContainer>
             )}
