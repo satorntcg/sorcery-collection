@@ -1,24 +1,49 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 
-const usd  = (n) => n != null ? `$${Number(n).toFixed(2)}` : '—'
+const usd    = (n) => n != null ? `$${Number(n).toFixed(2)}` : '—'
 const fmtPnl = (n) => { if (n == null) return '—'; const v = Number(n); return `${v >= 0 ? '+$' : '-$'}${Math.abs(v).toFixed(2)}` }
-const date = (d) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'
+const date   = (d) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'
 
-const BOX_TYPES = ['booster_box', 'prerelease_kit', 'single_booster', 'bundle', 'other']
-const SETS = ['Alpha', 'Beta', 'Arthurian Legends', 'Gothic', 'Other']
+const BOX_TYPES  = ['booster_box', 'prerelease_kit', 'single_booster', 'bundle', 'other']
+const SETS       = ['Alpha', 'Beta', 'Arthurian Legends', 'Gothic', 'Other']
+const RARITIES   = ['ordinary', 'exceptional', 'elite', 'unique']
+const CONDITIONS = ['near_mint', 'lightly_played', 'moderately_played', 'heavily_played', 'damaged']
 
 const BLANK = { name: '', set_name: 'Gothic', box_type: 'booster_box', purchase_price: '', pack_count: '36', pack_msrp: '5', purchased_at: '', seller: '', notes: '' }
 
+const PULL_BLANK = {
+  mode:           'search',   // 'search' | 'new'
+  cardId:         null,
+  cardName:       '',
+  rarity:         'ordinary',
+  condition:      'near_mint',
+  foil:           false,
+  setName:        'Gothic',
+  packId:         '',
+  newPackNumber:  '',
+  quantity:       1,
+}
+
 export default function Boxes() {
-  const [boxes, setBoxes]       = useState([])
-  const [loading, setLoading]   = useState(true)
-  const [modal, setModal]       = useState(false)
-  const [form, setForm]         = useState(BLANK)
-  const [saving, setSaving]     = useState(false)
-  const [selected, setSelected] = useState(null)
-  const [boxCards, setBoxCards] = useState([])
+  const [boxes,        setBoxes]        = useState([])
+  const [loading,      setLoading]      = useState(true)
+  const [modal,        setModal]        = useState(false)
+  const [form,         setForm]         = useState(BLANK)
+  const [saving,       setSaving]       = useState(false)
+  const [selected,     setSelected]     = useState(null)
+  const [boxCards,     setBoxCards]     = useState([])
   const [cardsLoading, setCardsLoading] = useState(false)
+
+  // Pull modal
+  const [pullModal,    setPullModal]    = useState(false)
+  const [pullForm,     setPullForm]     = useState(PULL_BLANK)
+  const [boxPacks,     setBoxPacks]     = useState([])
+  const [cardResults,  setCardResults]  = useState([])
+  const [cardSearch,   setCardSearch]   = useState('')
+  const [searchOpen,   setSearchOpen]   = useState(false)
+  const [pullSaving,   setPullSaving]   = useState(false)
+  const searchRef = useRef(null)
 
   async function load() {
     setLoading(true)
@@ -59,11 +84,45 @@ export default function Boxes() {
     setCardsLoading(false)
   }
 
+  async function loadBoxPacks(boxId) {
+    const { data } = await supabase
+      .from('packs')
+      .select('id, pack_number')
+      .eq('box_id', boxId)
+      .order('pack_number', { ascending: true })
+    setBoxPacks(data ?? [])
+  }
+
   useEffect(() => { load() }, [])
   useEffect(() => {
-    if (selected) loadBoxCards(selected)
-    else setBoxCards([])
+    if (selected) { loadBoxCards(selected); loadBoxPacks(selected) }
+    else { setBoxCards([]); setBoxPacks([]) }
   }, [selected])
+
+  // Card search autocomplete
+  useEffect(() => {
+    if (!cardSearch.trim()) { setCardResults([]); return }
+    const t = setTimeout(async () => {
+      const { data } = await supabase
+        .from('cards')
+        .select('id, name, rarity, set_name, foil')
+        .ilike('name', `%${cardSearch.trim()}%`)
+        .order('name')
+        .limit(8)
+      setCardResults(data ?? [])
+      setSearchOpen(true)
+    }, 200)
+    return () => clearTimeout(t)
+  }, [cardSearch])
+
+  // Close card search dropdown on outside click
+  useEffect(() => {
+    function handler(e) {
+      if (searchRef.current && !searchRef.current.contains(e.target)) setSearchOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
 
   const totalCost  = boxes.reduce((s, b) => s + Number(b.purchase_price || 0), 0)
   const totalValue = boxes.reduce((s, b) => s + Number(b.cards_market_value || 0), 0)
@@ -71,6 +130,7 @@ export default function Boxes() {
 
   const selectedBox = boxes.find(b => b.id === selected)
   const f = (field) => (e) => setForm(prev => ({ ...prev, [field]: e.target.value }))
+  const pf = (field, val) => setPullForm(prev => ({ ...prev, [field]: val !== undefined ? val : prev[field] }))
 
   async function save() {
     setSaving(true)
@@ -95,6 +155,101 @@ export default function Boxes() {
   async function markOpened(boxId) {
     await supabase.from('boxes').update({ opened_at: new Date().toISOString() }).eq('id', boxId)
     load()
+  }
+
+  async function savePull() {
+    if (!selected) return
+    setPullSaving(true)
+
+    try {
+      // 1. Resolve card ID and update/create inventory
+      let cardId = pullForm.cardId
+      const qty = Number(pullForm.quantity) || 1
+      if (pullForm.mode === 'new') {
+        if (!pullForm.cardName.trim()) { alert('Card name is required.'); setPullSaving(false); return }
+        const { data: newCard, error: cardErr } = await supabase
+          .from('cards')
+          .insert({
+            name:           pullForm.cardName.trim(),
+            set_name:       pullForm.setName,
+            rarity:         pullForm.rarity,
+            condition:      pullForm.condition,
+            foil:           pullForm.foil,
+            quantity_owned: qty,
+          })
+          .select('id')
+          .single()
+        if (cardErr) { alert(`Card creation failed: ${cardErr.message}`); setPullSaving(false); return }
+        cardId = newCard.id
+      } else {
+        // Existing card — increment quantity_owned
+        const { data: existing, error: fetchErr } = await supabase
+          .from('cards').select('quantity_owned').eq('id', cardId).single()
+        if (fetchErr) { alert(`Could not fetch card: ${fetchErr.message}`); setPullSaving(false); return }
+        const { error: updErr } = await supabase
+          .from('cards')
+          .update({ quantity_owned: (existing.quantity_owned ?? 0) + qty })
+          .eq('id', cardId)
+        if (updErr) { alert(`Inventory update failed: ${updErr.message}`); setPullSaving(false); return }
+      }
+      if (!cardId) { alert('Select or create a card first.'); setPullSaving(false); return }
+
+      // 2. Resolve pack ID
+      let packId = pullForm.packId === 'new' ? null : pullForm.packId
+      if (pullForm.packId === 'new') {
+        const packNum = parseInt(pullForm.newPackNumber)
+        if (!packNum) { alert('Enter a pack number.'); setPullSaving(false); return }
+        const { data: newPack, error: packErr } = await supabase
+          .from('packs')
+          .insert({ box_id: selected, pack_number: packNum, opened_at: new Date().toISOString() })
+          .select('id')
+          .single()
+        if (packErr) { alert(`Pack creation failed: ${packErr.message}`); setPullSaving(false); return }
+        packId = newPack.id
+      }
+      if (!packId) { alert('Select or create a pack first.'); setPullSaving(false); return }
+
+      // 3. Upsert into pack_cards
+      const { error: pcErr } = await supabase
+        .from('pack_cards')
+        .upsert(
+          { pack_id: packId, card_id: cardId, quantity: qty },
+          { onConflict: 'pack_id,card_id', ignoreDuplicates: false }
+        )
+      if (pcErr) { alert(`Failed to log pull: ${pcErr.message}`); setPullSaving(false); return }
+
+      // Reset and refresh
+      setPullModal(false)
+      setPullForm(PULL_BLANK)
+      setCardSearch('')
+      setCardResults([])
+      loadBoxCards(selected)
+      loadBoxPacks(selected)
+      // Refresh box list so P&L updates
+      load()
+    } catch (e) {
+      alert(`Unexpected error: ${e.message}`)
+    }
+    setPullSaving(false)
+  }
+
+  function openPullModal() {
+    setPullForm({ ...PULL_BLANK, packId: boxPacks.length === 1 ? boxPacks[0].id : '' })
+    setCardSearch('')
+    setCardResults([])
+    setSearchOpen(false)
+    setPullModal(true)
+  }
+
+  function selectCard(card) {
+    setPullForm(prev => ({ ...prev, mode: 'search', cardId: card.id, cardName: card.name }))
+    setCardSearch(card.name)
+    setSearchOpen(false)
+  }
+
+  function switchToNew() {
+    setPullForm(prev => ({ ...prev, mode: 'new', cardId: null, cardName: cardSearch }))
+    setSearchOpen(false)
   }
 
   return (
@@ -222,7 +377,10 @@ export default function Boxes() {
                     {selectedBox?.box_type?.replace(/_/g, ' ')} · {usd(selectedBox?.purchase_price)} cost
                   </div>
                 </div>
-                <button className="btn btn-ghost btn-sm" onClick={() => setSelected(null)}>✕</button>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <button className="btn btn-primary btn-sm" onClick={openPullModal}>+ Log pull</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => setSelected(null)}>✕</button>
+                </div>
               </div>
 
               {/* Box P&L summary */}
@@ -245,9 +403,9 @@ export default function Boxes() {
               ) : boxCards.length === 0 ? (
                 <div className="empty-state" style={{ padding: 32 }}>
                   <div className="empty-state-icon">🃏</div>
-                  No cards linked to this box yet.
-                  <div style={{ marginTop: 8, fontSize: 12 }}>
-                    Set <code style={{ background: 'var(--bg-void)', padding: '1px 5px', borderRadius: 4 }}>box_ref</code> in your import sheet to link cards.
+                  No cards logged yet.
+                  <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text-muted)' }}>
+                    Use "+ Log pull" above to add cards one by one, or the Bulk Import page for a full sheet.
                   </div>
                 </div>
               ) : (
@@ -295,7 +453,7 @@ export default function Boxes() {
                         Total card value
                       </td>
                       <td className="text-right text-gold" style={{ padding: '10px 14px', fontWeight: 500, borderTop: '1px solid var(--border)' }}>
-{usd(boxCards.reduce((s, r) => s + (r.price?.tcgplayer_market ?? 0) * r.quantity, 0) + 1.00)}
+                        {usd(boxCards.reduce((s, r) => s + (r.price?.tcgplayer_market ?? 0) * r.quantity, 0))}
                       </td>
                     </tr>
                   </tfoot>
@@ -306,7 +464,7 @@ export default function Boxes() {
         )}
       </div>
 
-      {/* Add box modal */}
+      {/* ── Add box modal ───────────────────────────────────────────────────── */}
       {modal && (
         <div className="modal-overlay" onClick={() => setModal(false)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
@@ -368,6 +526,206 @@ export default function Boxes() {
               <button className="btn" onClick={() => setModal(false)}>Cancel</button>
               <button className="btn btn-primary" onClick={save} disabled={!form.purchase_price || saving}>
                 {saving ? 'Saving…' : 'Add box'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Log pull modal ──────────────────────────────────────────────────── */}
+      {pullModal && (
+        <div className="modal-overlay" onClick={() => setPullModal(false)}>
+          <div className="modal" style={{ maxWidth: 480 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <span className="modal-title">Log pull — {selectedBox?.name ?? selectedBox?.set_name}</span>
+              <button className="btn btn-ghost btn-sm" onClick={() => setPullModal(false)}>✕</button>
+            </div>
+            <div className="modal-body">
+
+              {/* ── Card search ── */}
+              <div className="form-group" ref={searchRef} style={{ position: 'relative' }}>
+                <label className="form-label">Card *</label>
+                <input
+                  className="form-input"
+                  value={cardSearch}
+                  onChange={e => {
+                    setCardSearch(e.target.value)
+                    setPullForm(prev => ({ ...prev, cardId: null, cardName: e.target.value, mode: 'search' }))
+                    if (!e.target.value.trim()) setSearchOpen(false)
+                  }}
+                  onFocus={() => cardResults.length > 0 && setSearchOpen(true)}
+                  placeholder="Search by card name…"
+                  autoComplete="off"
+                />
+
+                {/* Dropdown */}
+                {searchOpen && (cardResults.length > 0 || cardSearch.trim()) && (
+                  <div style={{
+                    position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0, zIndex: 300,
+                    background: 'var(--bg-raised)', border: '1px solid var(--border)',
+                    borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+                    overflow: 'hidden',
+                  }}>
+                    {cardResults.map(card => (
+                      <div
+                        key={card.id}
+                        onMouseDown={() => selectCard(card)}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 10,
+                          padding: '8px 12px', cursor: 'pointer',
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.04)'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                      >
+                        <span className={`badge badge-${card.rarity}`} style={{ fontSize: 10 }}>{card.rarity}</span>
+                        <span style={{ flex: 1, fontSize: 13, color: 'var(--text-primary)' }}>{card.name}{card.foil ? ' ✦' : ''}</span>
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{card.set_name}</span>
+                      </div>
+                    ))}
+                    {cardSearch.trim() && (
+                      <div
+                        onMouseDown={switchToNew}
+                        style={{
+                          padding: '8px 12px', cursor: 'pointer', fontSize: 13,
+                          color: 'var(--gold)', borderTop: cardResults.length ? '1px solid var(--border)' : 'none',
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.background = 'rgba(201,168,76,0.06)'}
+                        onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                      >
+                        + Create new card "{cardSearch.trim()}"
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Selected card confirmation */}
+              {pullForm.mode === 'search' && pullForm.cardId && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px',
+                  background: 'rgba(201,168,76,0.07)', border: '1px solid rgba(201,168,76,0.2)',
+                  borderRadius: 6, marginTop: -8, marginBottom: 4, fontSize: 12,
+                }}>
+                  <span style={{ color: 'var(--gold)' }}>✓</span>
+                  <span style={{ color: 'var(--text-secondary)' }}>Existing card selected</span>
+                </div>
+              )}
+
+              {/* New card fields */}
+              {pullForm.mode === 'new' && (
+                <div style={{
+                  background: 'var(--bg-void)', border: '1px solid var(--border)',
+                  borderRadius: 8, padding: '12px 14px', marginTop: -8, marginBottom: 4,
+                }}>
+                  <div style={{ fontSize: 11, color: 'var(--gold)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                    New card details
+                  </div>
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label className="form-label">Rarity *</label>
+                      <select className="form-select" value={pullForm.rarity} onChange={e => pf('rarity', e.target.value)}>
+                        {RARITIES.map(r => <option key={r} value={r}>{r}</option>)}
+                      </select>
+                    </div>
+                    <div className="form-group">
+                      <label className="form-label">Set</label>
+                      <select className="form-select" value={pullForm.setName} onChange={e => pf('setName', e.target.value)}>
+                        {SETS.map(s => <option key={s}>{s}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label className="form-label">Condition</label>
+                      <select className="form-select" value={pullForm.condition} onChange={e => pf('condition', e.target.value)}>
+                        {CONDITIONS.map(c => <option key={c} value={c}>{c.replace(/_/g, ' ')}</option>)}
+                      </select>
+                    </div>
+                    <div className="form-group" style={{ display: 'flex', alignItems: 'flex-end', paddingBottom: 2 }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13, color: 'var(--text-secondary)' }}>
+                        <input
+                          type="checkbox"
+                          checked={pullForm.foil}
+                          onChange={e => pf('foil', e.target.checked)}
+                          style={{ width: 15, height: 15, accentColor: 'var(--gold)' }}
+                        />
+                        Foil ✦
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Pack selection */}
+              <div className="form-row" style={{ marginTop: 4 }}>
+                <div className="form-group">
+                  <label className="form-label">Pack *</label>
+                  <select
+                    className="form-select"
+                    value={pullForm.packId}
+                    onChange={e => pf('packId', e.target.value)}
+                  >
+                    <option value="">Select pack…</option>
+                    {boxPacks.map(p => (
+                      <option key={p.id} value={p.id}>Pack #{p.pack_number}</option>
+                    ))}
+                    <option value="new">+ New pack</option>
+                  </select>
+                </div>
+                {pullForm.packId === 'new' ? (
+                  <div className="form-group">
+                    <label className="form-label">Pack number</label>
+                    <input
+                      className="form-input"
+                      type="number"
+                      min="1"
+                      value={pullForm.newPackNumber}
+                      onChange={e => pf('newPackNumber', e.target.value)}
+                      placeholder="e.g. 1"
+                    />
+                  </div>
+                ) : (
+                  <div className="form-group">
+                    <label className="form-label">Quantity</label>
+                    <input
+                      className="form-input"
+                      type="number"
+                      min="1"
+                      value={pullForm.quantity}
+                      onChange={e => pf('quantity', e.target.value)}
+                    />
+                  </div>
+                )}
+              </div>
+
+              {pullForm.packId === 'new' && (
+                <div className="form-group">
+                  <label className="form-label">Quantity</label>
+                  <input
+                    className="form-input"
+                    type="number"
+                    min="1"
+                    value={pullForm.quantity}
+                    onChange={e => pf('quantity', e.target.value)}
+                  />
+                </div>
+              )}
+
+            </div>
+            <div className="modal-footer">
+              <button className="btn" onClick={() => setPullModal(false)}>Cancel</button>
+              <button
+                className="btn btn-primary"
+                onClick={savePull}
+                disabled={
+                  pullSaving ||
+                  (!pullForm.cardId && pullForm.mode !== 'new') ||
+                  (pullForm.mode === 'new' && !pullForm.cardName.trim()) ||
+                  !pullForm.packId ||
+                  (pullForm.packId === 'new' && !pullForm.newPackNumber)
+                }
+              >
+                {pullSaving ? 'Saving…' : 'Log pull'}
               </button>
             </div>
           </div>

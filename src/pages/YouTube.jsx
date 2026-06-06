@@ -116,20 +116,22 @@ function SummaryCard({ opening, packs }) {
         <div style={{ borderTop: '1px solid rgba(201,168,76,0.1)', paddingTop: 14 }}>
           <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 10 }}>Pack breakdown</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
-            {packBreakdown.map(p => (
-              <div key={p.number} style={{
-                background: p.value >= (opening.pack_msrp ?? 5)
-                  ? 'rgba(76,175,110,0.1)' : 'rgba(255,255,255,0.03)',
-                border: `1px solid ${p.value >= (opening.pack_msrp ?? 5)
-                  ? 'rgba(76,175,110,0.3)' : 'rgba(255,255,255,0.06)'}`,
-                borderRadius: 8, padding: '8px 6px', textAlign: 'center',
-              }}>
-                <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 3 }}>Pack {p.number}</div>
-                <div style={{ fontSize: 13, fontWeight: 500, color: p.value >= (opening.pack_msrp ?? 5) ? 'var(--success)' : 'var(--text-secondary)' }}>
-                  {usd(p.value)}
+            {packBreakdown.map(p => {
+              const displayVal = p.value + 1.00
+              const beats      = displayVal >= (opening.pack_msrp ?? 5)
+              return (
+                <div key={p.number} style={{
+                  background: beats ? 'rgba(76,175,110,0.1)' : 'rgba(255,255,255,0.03)',
+                  border: `1px solid ${beats ? 'rgba(76,175,110,0.3)' : 'rgba(255,255,255,0.06)'}`,
+                  borderRadius: 8, padding: '8px 6px', textAlign: 'center',
+                }}>
+                  <div style={{ fontSize: 9, color: 'var(--text-muted)', marginBottom: 3 }}>Pack {p.number}</div>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: beats ? 'var(--success)' : 'var(--text-secondary)' }}>
+                    {usd(displayVal)}
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         </div>
 
@@ -325,6 +327,8 @@ export default function YouTube() {
   const [editingShortsUrl, setEditingShortsUrl] = useState(null)
   const [shortsDraft, setShortsDraft]   = useState('')
   const [shortsMap, setShortsMap]       = useState({})
+  const [search, setSearch]             = useState('')
+  const [sortBy, setSortBy]             = useState('date_desc')
 
   async function load() {
     setLoading(true)
@@ -425,6 +429,27 @@ export default function YouTube() {
     load()
   }
 
+  // ── Filter + sort ─────────────────────────────────────────────────────────
+  const visibleOpenings = openings
+    .filter(o => {
+      if (!search.trim()) return true
+      const q = search.toLowerCase()
+      return (
+        o.title?.toLowerCase().includes(q) ||
+        o.box_name?.toLowerCase().includes(q) ||
+        o.set_name?.toLowerCase().includes(q)
+      )
+    })
+    .sort((a, b) => {
+      switch (sortBy) {
+        case 'date_asc':   return new Date(a.filmed_at) - new Date(b.filmed_at)
+        case 'value_desc': return (Number(b.total_tcg_value) || 0) - (Number(a.total_tcg_value) || 0)
+        case 'pnl_desc':   return (Number(b.opening_pnl) || 0) - (Number(a.opening_pnl) || 0)
+        case 'packs_desc': return (b.packs_in_video || 0) - (a.packs_in_video || 0)
+        default:           return new Date(b.filmed_at) - new Date(a.filmed_at) // date_desc
+      }
+    })
+
   return (
     <div className="page">
       <div className="page-header flex-between">
@@ -439,14 +464,48 @@ export default function YouTube() {
 
         {/* Openings list */}
         <div>
+          {/* Search + sort controls */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+            <div style={{ position: 'relative', flex: 1 }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none' }}>
+                <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+              <input
+                className="form-input"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search title or box…"
+                style={{ paddingLeft: 28, fontSize: 12 }}
+              />
+            </div>
+            <select
+              className="form-select"
+              value={sortBy}
+              onChange={e => setSortBy(e.target.value)}
+              style={{ fontSize: 12, width: 'auto', flexShrink: 0 }}
+            >
+              <option value="date_desc">Newest first</option>
+              <option value="date_asc">Oldest first</option>
+              <option value="value_desc">Highest value</option>
+              <option value="pnl_desc">Best P&amp;L</option>
+              <option value="packs_desc">Most packs</option>
+            </select>
+          </div>
+
           {loading ? <div className="loading">Loading…</div> : openings.length === 0 ? (
             <div className="empty-state">
               <div className="empty-state-icon">🎬</div>
               No openings yet — create your first one!
             </div>
+          ) : visibleOpenings.length === 0 ? (
+            <div className="empty-state" style={{ padding: 32 }}>
+              <div className="empty-state-icon">🔍</div>
+              No openings match "{search}"
+            </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              {openings.map(o => {
+              {visibleOpenings.map(o => {
                 const pnl      = Number(o.opening_pnl ?? 0)
                 const boxLabel = o.box_name ?? o.set_name
                 return (
@@ -567,6 +626,13 @@ export default function YouTube() {
               })}
             </div>
           )}
+          {!loading && openings.length > 0 && visibleOpenings.length > 0 && (
+            <div style={{ marginTop: 6, fontSize: 11, color: 'var(--text-muted)', textAlign: 'right' }}>
+              {visibleOpenings.length !== openings.length
+                ? `${visibleOpenings.length} of ${openings.length} shown`
+                : `${openings.length} opening${openings.length !== 1 ? 's' : ''}`}
+            </div>
+          )}
         </div>
 
         {/* Detail panel */}
@@ -588,9 +654,10 @@ export default function YouTube() {
                     </span>
                   </div>
                   {packData.map(pack => {
-                    const packValue = pack.cards.reduce((s, c) => s + (c.tcgplayer_market ?? 0) * c.quantity, 0)
-                    const packCost  = openingMeta?.pack_msrp ?? 5
-                    const isProfit  = packValue >= packCost
+                    const trackedVal = pack.cards.reduce((s, c) => s + (c.tcgplayer_market ?? 0) * c.quantity, 0)
+                    const packValue  = trackedVal + 1.00
+                    const packCost   = openingMeta?.pack_msrp ?? 5
+                    const isProfit   = packValue >= packCost
                     return (
                       <div key={pack.id} style={{ borderBottom: '1px solid var(--border)' }}>
                         <div style={{
@@ -615,30 +682,31 @@ export default function YouTube() {
                               .sort((a, b) => (b.tcgplayer_market ?? 0) - (a.tcgplayer_market ?? 0))
                               .map((card, i) => (
                                 <tr key={i}>
-                                <td style={{ paddingLeft: 24 }}><a
-                                  
-                                    href={`https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(card.name + ' Sorcery TCG')}&LH_Complete=1&LH_Sold=1&_sop=13`}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    style={{ color: 'var(--text-primary)', fontWeight: 500, textDecoration: 'none', borderBottom: '1px dashed var(--border-mid)' }}
-                                    onMouseOver={e => e.target.style.color = 'var(--gold-light)'}
-                                    onMouseOut={e => e.target.style.color = 'var(--text-primary)'}
-                                  >
-                                    {card.name}
-                                  </a>
-                                  <a      href={card.tcgplayer_id
-                                                ? `https://www.tcgplayer.com/product/${card.tcgplayer_id}`
-                                                : `https://www.tcgplayer.com/search/sorcery-contested-realm/product?q=${encodeURIComponent(card.name)}&view=grid`
-                                                }
-                                                target="_blank"
-                                                rel="noreferrer"
-                                                style={{ fontSize: 10, color: 'var(--text-muted)', textDecoration: 'none', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 6px', whiteSpace: 'nowrap' }}
-                                                onMouseOver={e => e.target.style.color = 'var(--gold-light)'}
-                                                onMouseOut={e => e.target.style.color = 'var(--text-muted)'}
-                                              >
-                                                TCG
-                                              </a>
-                                </td>
+                                  <td style={{ paddingLeft: 24 }}>
+                                    <a
+                                      href={`https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(card.name + ' Sorcery TCG')}&LH_Complete=1&LH_Sold=1&_sop=13`}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      style={{ color: 'var(--text-primary)', fontWeight: 500, textDecoration: 'none', borderBottom: '1px dashed var(--border-mid)' }}
+                                      onMouseOver={e => e.target.style.color = 'var(--gold-light)'}
+                                      onMouseOut={e => e.target.style.color = 'var(--text-primary)'}
+                                    >
+                                      {card.name}
+                                    </a>
+                                    <a
+                                      href={card.tcgplayer_id
+                                        ? `https://www.tcgplayer.com/product/${card.tcgplayer_id}`
+                                        : `https://www.tcgplayer.com/search/sorcery-contested-realm/product?q=${encodeURIComponent(card.name)}&view=grid`
+                                      }
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      style={{ fontSize: 10, color: 'var(--text-muted)', textDecoration: 'none', border: '1px solid var(--border)', borderRadius: 4, padding: '1px 6px', whiteSpace: 'nowrap', marginLeft: 6 }}
+                                      onMouseOver={e => e.target.style.color = 'var(--gold-light)'}
+                                      onMouseOut={e => e.target.style.color = 'var(--text-muted)'}
+                                    >
+                                      TCG
+                                    </a>
+                                  </td>
                                   <td>
                                     <span className={`badge badge-${card.rarity}`}>{card.rarity}</span>
                                   </td>
@@ -647,6 +715,17 @@ export default function YouTube() {
                                   </td>
                                 </tr>
                               ))}
+                            <tr style={{ opacity: 0.55 }}>
+                              <td style={{ paddingLeft: 24, fontSize: 11, fontStyle: 'italic', color: 'var(--text-muted)' }}>
+                                Ordinary card est.
+                              </td>
+                              <td>
+                                <span className="badge badge-ordinary" style={{ fontSize: 10 }}>ordinary</span>
+                              </td>
+                              <td className="text-right" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                                $1.00
+                              </td>
+                            </tr>
                           </tbody>
                         </table>
                       </div>
