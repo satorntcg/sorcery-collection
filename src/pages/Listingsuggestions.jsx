@@ -13,13 +13,13 @@ const calcNet = (price) => price - (price * EBAY_FEE_PCT + EBAY_FEE_FLAT) - DEFA
 function groupCards(cards) {
   const groups = []
 
-  // Exclude exceptionals — only unique and elite
-  const eligible = cards.filter(c => c.rarity === 'unique' || c.rarity === 'elite')
-
-  // Separate into tiers
-  const uniqueCards = eligible.filter(c => c.rarity === 'unique')
-  const foils       = eligible.filter(c => c.foil && c.rarity === 'elite')
-  const elites      = eligible.filter(c => !c.foil && c.rarity === 'elite')
+  // cards is already pre-filtered by the available check; just split into tiers.
+  // Sites always go into site-specific pools regardless of rarity.
+  const sites       = cards.filter(c => c.is_site && !c.foil)
+  const siteFoils   = cards.filter(c => c.is_site &&  c.foil)
+  const uniqueCards = cards.filter(c => c.rarity === 'unique' && !c.is_site)
+  const allFoils    = cards.filter(c => c.foil && c.rarity !== 'unique' && !c.is_site)
+  const elites      = cards.filter(c => !c.foil && c.rarity === 'elite' && !c.is_site)
 
   // Helper: pack cards into lots of max 6, only emit if total >= $20
   function packIntoLots(cardList, tierLabel, color) {
@@ -71,15 +71,19 @@ function groupCards(cards) {
     }
   }
 
-  // 1. Uniques ≥ $20 go solo (handled inside packIntoLots); sub-$20 uniques group together
+  // 1. Uniques: foil and non-foil keep separate lots (high value, worth distinguishing)
   packIntoLots(uniqueCards.filter(c =>  c.foil), 'Unique Foil', 'var(--gold-light)')
   packIntoLots(uniqueCards.filter(c => !c.foil), 'Unique',      'var(--gold)')
 
-  // 2. Elite foils grouped together
-  packIntoLots(foils,  'Elite Foil', '#7AADEC')
+  // 2. Sites: their own pool regardless of rarity — collectors buy site lots
+  packIntoLots(siteFoils, 'Site Foil', '#7ADBA0')
+  packIntoLots(sites,     'Site',      '#5A9E78')
 
-  // 3. Elite non-foils grouped together
-  packIntoLots(elites, 'Elite',      '#9A9080')
+  // 3. All non-unique non-site foils pool together — reaching $20 is easier mixed
+  packIntoLots(allFoils, 'Foil', '#7AADEC')
+
+  // 4. Elite non-foils
+  packIntoLots(elites, 'Elite', '#9A9080')
 
   return groups
 }
@@ -153,6 +157,7 @@ export default function ListingSuggestions() {
   const [creating, setCreating]   = useState({})
   const [created, setCreated]     = useState(new Set())
   const [error, setError]         = useState('')
+  const [filterTier, setFilterTier] = useState(null)
 
   useEffect(() => {
     async function load() {
@@ -161,8 +166,8 @@ export default function ListingSuggestions() {
       const [{ data }, { data: lotData }] = await Promise.all([
         supabase
           .from('v_inventory_dashboard')
-          .select('id, name, set_name, rarity, foil, tcgplayer_market, cost_basis, quantity_owned, quantity_listed, quantity_available, active_listing_count')
-          .not('rarity', 'eq', 'ordinary')
+          .select('id, name, set_name, rarity, foil, card_type, tcgplayer_market, cost_basis, quantity_owned, quantity_listed, quantity_available, active_listing_count')
+          .or('rarity.in.(unique,elite,exceptional),foil.eq.true,card_type.eq.site')
           .order('tcgplayer_market', { ascending: false }),
         // Fetch card IDs in active lot listings (card_id is null on the listing itself)
         supabase
@@ -179,20 +184,22 @@ export default function ListingSuggestions() {
       }
 
       // Filter: elite/unique, has truly available copies, has a price
-      // actual_listed = max(quantity_listed, active_listing_count) for single-card
-      //               + lot_listed for lot listings
+      // active_listing_count = active single-card ebay_listings (card_id is set)
+      // lotListed = active lot listings from ebay_listing_cards
+      // Don't use quantity_listed (cards table column) — createListing increments it for lot
+      // listings too, which would double-count with lotListedMap.
       const available = (data ?? []).filter(c => {
         const owned      = Number(c.quantity_owned ?? 0)
-        const singleList = Math.max(Number(c.quantity_listed ?? 0), Number(c.active_listing_count ?? 0))
+        const singleList = Number(c.active_listing_count ?? 0)
         const lotListed  = lotListedMap[c.id] ?? 0
         const price      = Number(c.tcgplayer_market ?? 0)
-        return (c.rarity === 'elite' || c.rarity === 'unique') && owned > (singleList + lotListed) && price > 0
+        return (c.rarity === 'elite' || c.rarity === 'unique' || c.foil || c.card_type === 'site') && owned > (singleList + lotListed) && price > 0
       })
 
       const withSite = available.map(c => ({
         ...c,
         card_id: c.id,
-        is_site: false,
+        is_site: c.card_type === 'site',
       }))
 
       setCards(withSite)
@@ -230,6 +237,15 @@ export default function ListingSuggestions() {
   const totalValue  = groups.reduce((s, g) => s + g.total, 0)
   const totalNet    = groups.reduce((s, g) => s + calcNet(g.total), 0)
   const unlistedCount = cards.length
+
+  // Derive tiers from groups preserving order and color
+  const tiers = []
+  const seenTiers = new Set()
+  for (const g of groups) {
+    if (!seenTiers.has(g.tier)) { tiers.push({ tier: g.tier, color: g.color }); seenTiers.add(g.tier) }
+  }
+
+  const visibleGroups = filterTier ? groups.filter(g => g.tier === filterTier) : groups
 
   if (loading) return <div className="page"><div className="loading">Analysing inventory…</div></div>
 
@@ -281,6 +297,33 @@ export default function ListingSuggestions() {
         </div>
       </div>
 
+      {/* Tier filter buttons */}
+      {tiers.length > 1 && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => setFilterTier(null)}
+            style={!filterTier ? { borderColor: 'var(--gold)', color: 'var(--gold)' } : {}}
+          >
+            All ({groups.length})
+          </button>
+          {tiers.map(({ tier, color }) => {
+            const count = groups.filter(g => g.tier === tier).length
+            const active = filterTier === tier
+            return (
+              <button
+                key={tier}
+                className="btn btn-ghost btn-sm"
+                onClick={() => setFilterTier(active ? null : tier)}
+                style={active ? { borderColor: color, color, background: `${color}18` } : {}}
+              >
+                {tier} ({count})
+              </button>
+            )
+          })}
+        </div>
+      )}
+
       {groups.length === 0 ? (
         <div className="empty-state">
           <div className="empty-state-icon">🎉</div>
@@ -288,7 +331,8 @@ export default function ListingSuggestions() {
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {groups.map((group, i) => {
+          {visibleGroups.map((group) => {
+            const i        = groups.indexOf(group)
             const ai       = aiData[i]
             const net      = calcNet(group.total)
             const isCreated = created.has(i)
@@ -348,7 +392,7 @@ export default function ListingSuggestions() {
                           borderRadius: 4,
                           color: card.foil ? 'var(--gold-light)' : 'var(--text-secondary)',
                         }}>
-                          {card.name}{card.foil ? ' ✦' : ''} · {usd(card.tcgplayer_market)}
+                          {card.name}{card.foil ? ' ✦' : ''}{card.is_site ? ' ⬡' : ''} · {usd(card.tcgplayer_market)}
                         </div>
                       ))}
                     </div>

@@ -7,11 +7,12 @@ const usd = (n) => n != null ? `$${Number(n).toFixed(2)}` : '—'
 const RARITIES   = ['ordinary', 'exceptional', 'elite', 'unique']
 const CONDITIONS = ['near_mint', 'lightly_played', 'moderately_played', 'heavily_played', 'damaged']
 const SETS       = ['Alpha', 'Beta', 'Arthurian Legends', 'Gothic', 'Other']
+const CARD_TYPES = ['site', 'minion', 'magic', 'artifact', 'avatar']
 
 const BLANK = {
   name: '', set_name: 'Gothic', set_code: '', rarity: 'elite',
   condition: 'near_mint', foil: false, quantity_owned: 1,
-  cost_basis: '', image_url: '', tcgplayer_id: '', notes: '',
+  cost_basis: '', image_url: '', tcgplayer_id: '', notes: '', card_type: '',
 }
 
 const CONDITION_MAP = {
@@ -188,6 +189,7 @@ export default function Inventory() {
       image_url:      form.image_url?.trim()    || null,
       tcgplayer_id:   form.tcgplayer_id?.trim() || null,
       notes:          form.notes?.trim()         || null,
+      card_type:      form.card_type             || null,
     }
     if (form.cost_basis !== '' && form.cost_basis != null) {
       payload.cost_basis = parseFloat(form.cost_basis) || null
@@ -462,11 +464,20 @@ export default function Inventory() {
                 <label className="form-label">Notes</label>
                 <textarea className="form-textarea" value={form.notes} onChange={f('notes')} placeholder="Any notes about this card…" />
               </div>
-              <div className="form-group">
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-                  <input type="checkbox" checked={form.foil} onChange={f('foil')} />
-                  <span className="form-label" style={{ margin: 0 }}>Foil</span>
-                </label>
+              <div className="form-row">
+                <div className="form-group" style={{ flex: '0 0 auto' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 22 }}>
+                    <input type="checkbox" checked={form.foil} onChange={f('foil')} />
+                    <span className="form-label" style={{ margin: 0 }}>Foil</span>
+                  </label>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Card type <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(optional)</span></label>
+                  <select className="form-select" value={form.card_type} onChange={f('card_type')}>
+                    <option value="">— unspecified —</option>
+                    {CARD_TYPES.map(t => <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>)}
+                  </select>
+                </div>
               </div>
               {modal === 'add' && (
                 <div className="form-row">

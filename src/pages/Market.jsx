@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 import WeeklyMovers from '../components/Weeklymovers'
@@ -30,6 +30,7 @@ export default function Market() {
   const [loading, setLoading]         = useState(true)
   const [lastChecked, setLastChecked] = useState(null)
   const [search, setSearch]           = useState('')
+  const [myListings, setMyListings]   = useState([])
 
   useEffect(() => {
     async function load() {
@@ -50,7 +51,7 @@ export default function Market() {
   }, [runResult])
 
   useEffect(() => {
-    if (!selected) return
+    if (!selected) { setMyListings([]); return }
     async function loadHistory() {
       const [{ data: snapData }, { data: myListingsData }, { data: lotData }] = await Promise.all([
         supabase
@@ -62,31 +63,68 @@ export default function Market() {
         // all single-card listings (active + sold)
         supabase
           .from('ebay_listings')
-          .select('listed_price, sold_price, sold_at, listed_at, status')
+          .select('id, title, listed_price, sold_price, sold_at, listed_at, status, ebay_url')
           .eq('card_id', selected)
           .in('status', ['active', 'sold'])
           .order('listed_at', { ascending: true }),
         // all lot cards (active + sold) — use per-card price from junction
         supabase
           .from('ebay_listing_cards')
-          .select('price, ebay_listings!listing_id(listed_at, sold_at, status)')
+          .select('price, ebay_listings!listing_id(id, title, listed_price, listed_at, sold_at, status, created_at, ebay_url)')
           .eq('card_id', selected),
       ])
 
-      // flatten all own listings into { price, date } — sold uses sold_price/sold_at, active uses listed_price/listed_at
+      const today = new Date().toISOString().slice(0, 10)
+
+      // flatten all own listings into { price, date }
       const myPoints = [
         ...(myListingsData ?? []).map(l => ({
           price: l.status === 'sold' && l.sold_price != null ? Number(l.sold_price) : Number(l.listed_price),
-          date:  (l.status === 'sold' && l.sold_at ? l.sold_at : l.listed_at)?.slice(0, 10),
+          date:  (l.status === 'sold' && l.sold_at ? l.sold_at : l.listed_at)?.slice(0, 10) ?? today,
         })),
         ...(lotData ?? [])
-          .filter(lc => lc.ebay_listings?.listed_at && lc.price != null && ['active', 'sold'].includes(lc.ebay_listings.status))
-          .map(lc => ({
-            price: Number(lc.price),
-            date:  (lc.ebay_listings.status === 'sold' && lc.ebay_listings.sold_at
-              ? lc.ebay_listings.sold_at : lc.ebay_listings.listed_at).slice(0, 10),
-          })),
+          .filter(lc => lc.price != null && lc.ebay_listings != null && ['active', 'sold'].includes(lc.ebay_listings.status))
+          .map(lc => {
+            const el = lc.ebay_listings
+            const rawDate = el.status === 'sold' && el.sold_at
+              ? el.sold_at
+              : (el.listed_at ?? el.created_at ?? today)
+            return { price: Number(lc.price), date: rawDate.slice(0, 10) }
+          }),
       ].filter(p => p.date && !isNaN(p.price))
+
+      // Build combined listings list for display
+      const listingsDisplay = [
+        ...(myListingsData ?? []).map(l => ({
+          id:       l.id,
+          title:    l.title,
+          status:   l.status,
+          price:    l.status === 'sold' && l.sold_price != null ? Number(l.sold_price) : Number(l.listed_price),
+          ebay_url: l.ebay_url,
+          type:     'single',
+          date:     (l.status === 'sold' && l.sold_at ? l.sold_at : l.listed_at)?.slice(0, 10) ?? today,
+        })),
+      ]
+      // Deduplicate lot listings by listing id
+      const seenLotIds = new Set()
+      for (const lc of (lotData ?? [])) {
+        const el = lc.ebay_listings
+        if (!el || !['active', 'sold'].includes(el.status) || seenLotIds.has(el.id)) continue
+        seenLotIds.add(el.id)
+        const rawDate = el.status === 'sold' && el.sold_at
+          ? el.sold_at : (el.listed_at ?? el.created_at ?? today)
+        listingsDisplay.push({
+          id:       el.id,
+          title:    el.title,
+          status:   el.status,
+          price:    Number(el.listed_price ?? lc.price),
+          ebay_url: el.ebay_url,
+          type:     'lot',
+          date:     rawDate.slice(0, 10),
+        })
+      }
+      listingsDisplay.sort((a, b) => b.date.localeCompare(a.date))
+      setMyListings(listingsDisplay)
 
       const entries = new Map()
       for (const s of (snapData ?? [])) {
@@ -311,6 +349,70 @@ export default function Market() {
                   </div>
                 </div>
               </div>
+
+              {myListings.length > 0 && (
+                <div className="panel mb-16">
+                  <div className="panel-header">
+                    <span className="panel-title">My eBay Listings</span>
+                    <Link to="/listings" style={{ fontSize: 11, color: 'var(--gold)', textDecoration: 'none', borderBottom: '1px dashed var(--gold)' }}>
+                      View all ↗
+                    </Link>
+                  </div>
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Title</th>
+                        <th>Type</th>
+                        <th>Status</th>
+                        <th className="text-right">Price</th>
+                        <th>Date</th>
+                        <th>Links</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {myListings.map(l => (
+                        <tr key={l.id}>
+                          <td style={{ maxWidth: 240, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 12 }}>
+                            {l.title || '—'}
+                          </td>
+                          <td>
+                            <span style={{ fontSize: 10, color: 'var(--text-muted)', background: 'var(--bg-void)', padding: '2px 6px', borderRadius: 4 }}>
+                              {l.type}
+                            </span>
+                          </td>
+                          <td>
+                            <span className={`badge badge-${l.status === 'active' ? 'ok' : l.status === 'sold' ? 'alert' : ''}`} style={{ fontSize: 10 }}>
+                              {l.status}
+                            </span>
+                          </td>
+                          <td className="text-right" style={{ fontSize: 13, color: 'var(--gold-light)' }}>{usd(l.price)}</td>
+                          <td style={{ fontSize: 11, color: 'var(--text-muted)' }}>{dateShort(l.date)}</td>
+                          <td>
+                            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                              <Link
+                                to="/listings"
+                                style={{ fontSize: 11, color: 'var(--text-secondary)', textDecoration: 'none', borderBottom: '1px dashed var(--border-mid)' }}
+                              >
+                                App ↗
+                              </Link>
+                              {l.ebay_url && (
+                                <a
+                                  href={l.ebay_url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  style={{ fontSize: 11, color: 'var(--gold)', textDecoration: 'none', borderBottom: '1px dashed var(--gold)' }}
+                                >
+                                  eBay ↗
+                                </a>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
 
               <div className="panel">
                 <div className="panel-header">
