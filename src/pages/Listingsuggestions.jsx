@@ -71,17 +71,9 @@ function groupCards(cards) {
     }
   }
 
-  // 1. Unique — each card gets its own listing (high value)
-  for (const card of uniqueCards) {
-    const price = card.tcgplayer_market || 0
-    groups.push({
-      tier:    card.foil ? 'Unique Foil' : 'Unique',
-      cards:   [card],
-      total:   price,
-      color:   card.foil ? 'var(--gold-light)' : 'var(--gold)',
-      partial: price < 20,
-    })
-  }
+  // 1. Uniques ≥ $20 go solo (handled inside packIntoLots); sub-$20 uniques group together
+  packIntoLots(uniqueCards.filter(c =>  c.foil), 'Unique Foil', 'var(--gold-light)')
+  packIntoLots(uniqueCards.filter(c => !c.foil), 'Unique',      'var(--gold)')
 
   // 2. Elite foils grouped together
   packIntoLots(foils,  'Elite Foil', '#7AADEC')
@@ -165,26 +157,42 @@ export default function ListingSuggestions() {
   useEffect(() => {
     async function load() {
       setLoading(true)
-      // Fetch cards not already listed — join with ebay_listing_cards to exclude
-      const { data } = await supabase
-        .from('v_inventory_dashboard')
-        .select('id, name, set_name, rarity, foil, tcgplayer_market, cost_basis, quantity_owned, quantity_listed, quantity_available, active_listing_count')
-        .not('rarity', 'eq', 'ordinary')
-        .order('tcgplayer_market', { ascending: false })
 
-      // Filter: elite/unique only, has available copies, has a price
+      const [{ data }, { data: lotData }] = await Promise.all([
+        supabase
+          .from('v_inventory_dashboard')
+          .select('id, name, set_name, rarity, foil, tcgplayer_market, cost_basis, quantity_owned, quantity_listed, quantity_available, active_listing_count')
+          .not('rarity', 'eq', 'ordinary')
+          .order('tcgplayer_market', { ascending: false }),
+        // Fetch card IDs in active lot listings (card_id is null on the listing itself)
+        supabase
+          .from('ebay_listing_cards')
+          .select('card_id, quantity, ebay_listings!listing_id(status)')
+      ])
+
+      // Build map: card_id → total quantity in active lot listings
+      const lotListedMap = {}
+      for (const lc of (lotData ?? [])) {
+        if (lc.ebay_listings?.status === 'active' && lc.card_id) {
+          lotListedMap[lc.card_id] = (lotListedMap[lc.card_id] ?? 0) + (lc.quantity ?? 1)
+        }
+      }
+
+      // Filter: elite/unique, has truly available copies, has a price
+      // actual_listed = max(quantity_listed, active_listing_count) for single-card
+      //               + lot_listed for lot listings
       const available = (data ?? []).filter(c => {
-        const owned  = Number(c.quantity_owned ?? 0)
-        const listed = Number(c.quantity_listed ?? 0)
-        const price  = Number(c.tcgplayer_market ?? 0)
-        return (c.rarity === 'elite' || c.rarity === 'unique') && owned > listed && price > 0
+        const owned      = Number(c.quantity_owned ?? 0)
+        const singleList = Math.max(Number(c.quantity_listed ?? 0), Number(c.active_listing_count ?? 0))
+        const lotListed  = lotListedMap[c.id] ?? 0
+        const price      = Number(c.tcgplayer_market ?? 0)
+        return (c.rarity === 'elite' || c.rarity === 'unique') && owned > (singleList + lotListed) && price > 0
       })
 
-      // Add is_site flag based on known site cards — can expand this list
       const withSite = available.map(c => ({
         ...c,
         card_id: c.id,
-        is_site: false, // TODO: add site detection from card type when available
+        is_site: false,
       }))
 
       setCards(withSite)
