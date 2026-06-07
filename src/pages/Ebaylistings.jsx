@@ -693,7 +693,7 @@ export default function EbayListings() {
   const activeListings = listings.filter(l => l.status === 'active')
   const soldListings   = listings.filter(l => l.status === 'sold')
   const tabListings    = (tab === 'active' ? activeListings : soldListings).filter(l => {
-    if (unlinkedOnly && l.card_id) return false
+    if (unlinkedOnly && (l.card_id || (l.card_count ?? 0) > 0)) return false
     if (!search) return true
     const q = search.toLowerCase()
     return (

@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 
 const usd      = n => n == null ? '—' : `$${Number(n).toFixed(2)}`
 const slugify  = s => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+const FORMSPREE_ID = import.meta.env.VITE_FORMSPREE_ID
 
 export default function PublicCards() {
   const [cards, setCards]         = useState([])
@@ -11,7 +12,7 @@ export default function PublicCards() {
   const [search, setSearch]       = useState('')
   const [rarityFilter,  setRarity]      = useState('all')
   const [setFilter,     setSetFilter]   = useState('all')
-  const [ebayOnly,      setEbayOnly]    = useState(false)
+  const [ebayOnly,      setEbayOnly]    = useState(true)
   const [foilFilter,    setFoilFilter]  = useState('all')
 
   const [ebayMap,    setEbayMap]    = useState(new Map())
@@ -20,6 +21,13 @@ export default function PublicCards() {
   const [moversOpen, setMoversOpen] = useState(true)
   const [sortKey, setSortKey] = useState('tcgplayer_market')
   const [sortDir, setSortDir] = useState('desc')
+
+  // Want list state
+  const [wantList,       setWantList]       = useState(new Map())
+  const [showWantModal,  setShowWantModal]  = useState(false)
+  const [wantForm,       setWantForm]       = useState({ name: '', email: '', notes: '' })
+  const [wantStatus,     setWantStatus]     = useState('idle')
+  const [wantError,      setWantError]      = useState('')
 
   useEffect(() => {
     document.title = 'Card Prices — SatornTCG'
@@ -111,14 +119,76 @@ export default function PublicCards() {
 
   const arrow = (key) => sortKey === key ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''
 
+  function toggleWant(id) {
+    setWantList(prev => {
+      const next = new Map(prev)
+      next.has(id) ? next.delete(id) : next.set(id, 1)
+      return next
+    })
+  }
+
+  function setWantQty(id, qty) {
+    setWantList(prev => {
+      const next = new Map(prev)
+      qty < 1 ? next.delete(id) : next.set(id, qty)
+      return next
+    })
+  }
+
+  function closeWantModal() {
+    setShowWantModal(false)
+    setWantStatus('idle')
+    setWantError('')
+  }
+
+  async function submitWantList() {
+    if (!FORMSPREE_ID) {
+      setWantError('Contact form is not configured. Please email contact@satorntcg.com directly.')
+      setWantStatus('error')
+      return
+    }
+    setWantStatus('sending')
+    setWantError('')
+
+    const selectedCards = cards.filter(c => wantList.has(c.id))
+    const cardLines = selectedCards.map(c => {
+      const foilSuffix = c.foil && !c.name.toLowerCase().includes('foil') ? ' (Foil)' : ''
+      const qty = wantList.get(c.id) ?? 1
+      return `• ${qty > 1 ? `${qty}× ` : ''}${c.name}${foilSuffix} · ${c.rarity} · ${c.set_name} · TCG ${usd(c.tcgplayer_market)}`
+    }).join('\n')
+    const message = `I'm interested in the following cards:\n\n${cardLines}${wantForm.notes ? `\n\nAdditional notes:\n${wantForm.notes}` : ''}`
+
+    try {
+      const res = await fetch(`https://formspree.io/f/${FORMSPREE_ID}`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body:    JSON.stringify({ name: wantForm.name, email: wantForm.email, subject: 'Card Want List', message }),
+      })
+      if (res.ok) {
+        setWantStatus('success')
+        setWantList(new Map())
+        setWantForm({ name: '', email: '', notes: '' })
+      } else {
+        const data = await res.json()
+        setWantError(data?.errors?.[0]?.message ?? 'Submission failed. Please try again.')
+        setWantStatus('error')
+      }
+    } catch {
+      setWantError('Network error. Please try again or email contact@satorntcg.com directly.')
+      setWantStatus('error')
+    }
+  }
+
+  const wantCards = cards.filter(c => wantList.has(c.id))
+
   return (
-    <div style={{ maxWidth: '1100px', margin: '0 auto', padding: '32px 24px' }}>
+    <div style={{ maxWidth: '1100px', margin: '0 auto', padding: '32px 24px', paddingBottom: wantList.size > 0 ? 96 : 32 }}>
 
       {/* Page header */}
       <div className="page-header">
         <h1 className="page-title">Card Prices</h1>
         <p className="page-subtitle">
-          Live TCGPlayer market prices · {loading ? '…' : `${cards.length} cards`}
+          Live TCGPlayer market prices · {loading ? '…' : `${cards.length} cards`} · Tick cards you're interested in to send a purchase request
         </p>
       </div>
 
@@ -258,6 +328,7 @@ export default function PublicCards() {
           <table className="data-table" style={{ minWidth: 560 }}>
             <thead>
               <tr>
+                <th style={{ width: 32 }}></th>
                 <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('name')}>Card{arrow('name')}</th>
                 <th>Set</th>
                 <th>Rarity</th>
@@ -267,70 +338,217 @@ export default function PublicCards() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map(c => (
-                <tr key={c.id}>
-                  <td>
-                    <Link
-                      to={`/cards/${slugify(c.name)}/${c.id}`}
-                      style={{ textDecoration: 'none', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 10 }}
-                    >
-                      {(c.image_url || c.tcgplayer_id)
-                        ? <div style={{ width: 32, height: 44, borderRadius: 4, overflow: 'hidden', flexShrink: 0 }}>
-                            <img src={c.image_url || `https://product-images.tcgplayer.com/fit-in/400x558/${c.tcgplayer_id}.jpg`} alt={c.name} style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scale(1.08)', display: 'block' }} />
-                          </div>
-                        : <div style={{ width: 32, height: 44, background: 'var(--bg-raised)', borderRadius: 3, flexShrink: 0 }} />
-                      }
-                      <span>{c.name}{c.foil ? ' ✦' : ''}</span>
-                    </Link>
-                  </td>
-                  <td className="set-cell">{c.set_name}</td>
-                  <td>
-                    {c.rarity && (
-                      <span className={`badge badge-${c.rarity}`}>{c.rarity}</span>
-                    )}
-                  </td>
-                  <td style={{ textAlign: 'right' }}>
-                    {c.tcgplayer_market != null ? (
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                        <span style={{ color: 'var(--gold)' }}>{usd(c.tcgplayer_market)}</span>
-                        {changeMap.has(c.id) && (() => {
-                          const ch = changeMap.get(c.id)
-                          return (
-                            <span style={{ fontSize: 10, color: ch > 0 ? 'var(--success)' : 'var(--danger)', whiteSpace: 'nowrap' }}>
-                              {ch > 0 ? '▲' : '▼'} ${Math.abs(ch).toFixed(2)}
-                            </span>
-                          )
-                        })()}
-                      </span>
-                    ) : (
-                      <span className="text-muted">—</span>
-                    )}
-                  </td>
-                  <td style={{ textAlign: 'right' }}>
-                    {(c.quantity_owned ?? 0) > 0 ? (
-                      <span className="text-success">{c.quantity_owned}</span>
-                    ) : (
-                      <span className="text-muted">—</span>
-                    )}
-                  </td>
-                  <td style={{ textAlign: 'right' }}>
-                    {(() => {
-                      const l = ebayMap.get(c.id)
-                      if (!l?.ebay_url) return <span className="text-muted">—</span>
-                      return (
-                        <a href={l.ebay_url} target="_blank" rel="noreferrer" className="btn btn-primary"
-                          style={{ fontSize: 11, padding: '4px 10px', whiteSpace: 'nowrap', textDecoration: 'none' }}>
-                          Buy Now {usd(l.listed_price)}
-                        </a>
-                      )
-                    })()}
-                  </td>
-                </tr>
-              ))}
+              {filtered.map(c => {
+                const isWanted = wantList.has(c.id)
+                return (
+                  <tr key={c.id} style={isWanted ? { background: 'rgba(201,168,76,0.06)' } : undefined}>
+                    <td onClick={e => e.stopPropagation()} style={{ textAlign: 'center' }}>
+                      {(c.quantity_owned ?? 0) > 0 && (
+                        <input
+                          type="checkbox"
+                          checked={isWanted}
+                          onChange={() => toggleWant(c.id)}
+                          style={{ accentColor: 'var(--gold)', width: 14, height: 14, cursor: 'pointer' }}
+                        />
+                      )}
+                    </td>
+                    <td>
+                      <Link
+                        to={`/cards/${slugify(c.name)}/${c.id}`}
+                        style={{ textDecoration: 'none', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 10 }}
+                      >
+                        {(c.image_url || c.tcgplayer_id)
+                          ? <div style={{ width: 32, height: 44, borderRadius: 4, overflow: 'hidden', flexShrink: 0 }}>
+                              <img src={c.image_url || `https://product-images.tcgplayer.com/fit-in/400x558/${c.tcgplayer_id}.jpg`} alt={c.name} style={{ width: '100%', height: '100%', objectFit: 'cover', transform: 'scale(1.08)', display: 'block' }} />
+                            </div>
+                          : <div style={{ width: 32, height: 44, background: 'var(--bg-raised)', borderRadius: 3, flexShrink: 0 }} />
+                        }
+                        <span>{c.name}{c.foil ? ' ✦' : ''}</span>
+                      </Link>
+                    </td>
+                    <td className="set-cell">{c.set_name}</td>
+                    <td>
+                      {c.rarity && (
+                        <span className={`badge badge-${c.rarity}`}>{c.rarity}</span>
+                      )}
+                    </td>
+                    <td style={{ textAlign: 'right' }}>
+                      {c.tcgplayer_market != null ? (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ color: 'var(--gold)' }}>{usd(c.tcgplayer_market)}</span>
+                          {changeMap.has(c.id) && (() => {
+                            const ch = changeMap.get(c.id)
+                            return (
+                              <span style={{ fontSize: 10, color: ch > 0 ? 'var(--success)' : 'var(--danger)', whiteSpace: 'nowrap' }}>
+                                {ch > 0 ? '▲' : '▼'} ${Math.abs(ch).toFixed(2)}
+                              </span>
+                            )
+                          })()}
+                        </span>
+                      ) : (
+                        <span className="text-muted">—</span>
+                      )}
+                    </td>
+                    <td style={{ textAlign: 'right' }}>
+                      {(c.quantity_owned ?? 0) > 0 ? (
+                        <span className="text-success">{c.quantity_owned}</span>
+                      ) : (
+                        <span className="text-muted">—</span>
+                      )}
+                    </td>
+                    <td style={{ textAlign: 'right' }}>
+                      {(() => {
+                        const l = ebayMap.get(c.id)
+                        if (!l?.ebay_url) return <span className="text-muted">—</span>
+                        return (
+                          <a href={l.ebay_url} target="_blank" rel="noreferrer" className="btn btn-primary"
+                            style={{ fontSize: 11, padding: '4px 10px', whiteSpace: 'nowrap', textDecoration: 'none' }}>
+                            Buy Now {usd(l.listed_price)}
+                          </a>
+                        )
+                      })()}
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
       )}
+
+      {/* Floating want list bar */}
+      {wantList.size > 0 && (
+        <div style={{
+          position: 'fixed', bottom: 0, left: 0, right: 0,
+          background: 'var(--bg-void)', borderTop: '2px solid var(--gold)',
+          padding: '12px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          zIndex: 100, boxShadow: '0 -8px 32px rgba(0,0,0,0.8)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontFamily: 'var(--font-display)', color: 'var(--gold)', fontSize: 14 }}>
+              {[...wantList.values()].reduce((s, q) => s + q, 0)} card{[...wantList.values()].reduce((s, q) => s + q, 0) !== 1 ? 's' : ''} selected
+            </span>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              {wantCards.map(c => c.name + (c.foil ? ' ✦' : '')).slice(0, 3).join(', ')}
+              {wantList.size > 3 ? ` +${wantList.size - 3} more` : ''}
+            </span>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-ghost btn-sm" onClick={() => setWantList(new Map())}>Clear</button>
+            <button className="btn btn-primary" onClick={() => setShowWantModal(true)}>Send Request</button>
+          </div>
+        </div>
+      )}
+
+      {/* Want list modal */}
+      {showWantModal && (
+        <div className="modal-overlay" onClick={closeWantModal}>
+          <div className="modal" style={{ maxWidth: 520 }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <span className="modal-title">Request Cards</span>
+              <button className="btn btn-ghost btn-sm" onClick={closeWantModal}>✕</button>
+            </div>
+
+            {wantStatus === 'success' ? (
+              <div className="modal-body" style={{ textAlign: 'center', padding: '32px 24px' }}>
+                <div style={{ fontSize: 36, marginBottom: 12 }}>✓</div>
+                <div style={{ fontFamily: 'var(--font-display)', fontSize: 15, color: 'var(--gold-light)', marginBottom: 8 }}>Request Sent</div>
+                <p style={{ color: 'var(--text-secondary)', fontSize: 13, lineHeight: 1.6 }}>
+                  We'll get back to you at {wantForm.email || 'your email'} as soon as possible.
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="modal-body">
+                  {/* Selected cards */}
+                  <div style={{ marginBottom: 16 }}>
+                    <div className="form-label" style={{ marginBottom: 8 }}>Selected cards ({wantCards.length})</div>
+                    <div style={{ background: 'var(--bg-void)', borderRadius: 'var(--radius-sm)', padding: '10px 12px', maxHeight: 160, overflowY: 'auto' }}>
+                      {wantCards.map(c => {
+                        const qty = wantList.get(c.id) ?? 1
+                        return (
+                          <div key={c.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid var(--border)', fontSize: 13 }}>
+                            <span style={{ color: 'var(--text-primary)', flex: 1, minWidth: 0 }}>
+                              {c.name}{c.foil && !c.name.toLowerCase().includes('foil') ? ' ✦' : ''}
+                              <span style={{ color: 'var(--text-muted)', marginLeft: 6, fontSize: 11 }}>{c.set_name}</span>
+                            </span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                              {c.rarity && <span className={`badge badge-${c.rarity}`} style={{ fontSize: 10 }}>{c.rarity}</span>}
+                              <span style={{ color: 'var(--gold)', fontSize: 12 }}>{usd(c.tcgplayer_market)}</span>
+                              {/* Quantity stepper */}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                                <button onClick={() => setWantQty(c.id, qty - 1)} style={{ background: 'var(--bg-raised)', border: '1px solid var(--border)', color: 'var(--text-secondary)', borderRadius: 3, width: 22, height: 22, cursor: 'pointer', fontSize: 14, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>−</button>
+                                <span style={{ minWidth: 18, textAlign: 'center', fontSize: 13 }}>{qty}</span>
+                                <button onClick={() => setWantQty(c.id, qty + 1)} style={{ background: 'var(--bg-raised)', border: '1px solid var(--border)', color: 'var(--text-secondary)', borderRadius: 3, width: 22, height: 22, cursor: 'pointer', fontSize: 14, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>+</button>
+                              </div>
+                              <button
+                                onClick={() => toggleWant(c.id)}
+                                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: '0 2px' }}
+                              >✕</button>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Contact fields */}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+                    <div>
+                      <label className="form-label">Name *</label>
+                      <input
+                        className="form-input"
+                        type="text"
+                        value={wantForm.name}
+                        onChange={e => setWantForm(p => ({ ...p, name: e.target.value }))}
+                        placeholder="Your name"
+                      />
+                    </div>
+                    <div>
+                      <label className="form-label">Email *</label>
+                      <input
+                        className="form-input"
+                        type="email"
+                        value={wantForm.email}
+                        onChange={e => setWantForm(p => ({ ...p, email: e.target.value }))}
+                        placeholder="you@example.com"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="form-label">Additional notes <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(optional)</span></label>
+                    <textarea
+                      className="form-textarea"
+                      value={wantForm.notes}
+                      onChange={e => setWantForm(p => ({ ...p, notes: e.target.value }))}
+                      placeholder="Condition preferences, budget, questions…"
+                      rows={3}
+                      style={{ width: '100%', resize: 'vertical' }}
+                    />
+                  </div>
+
+                  {wantStatus === 'error' && (
+                    <div style={{ color: 'var(--danger)', fontSize: 13, marginTop: 10 }}>{wantError}</div>
+                  )}
+                </div>
+
+                <div className="modal-footer">
+                  <button className="btn" onClick={closeWantModal}>Cancel</button>
+                  <button
+                    className="btn btn-primary"
+                    onClick={submitWantList}
+                    disabled={wantStatus === 'sending' || !wantForm.name.trim() || !wantForm.email.trim()}
+                  >
+                    {wantStatus === 'sending' ? 'Sending…' : 'Send Request'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
     </div>
   )
 }
