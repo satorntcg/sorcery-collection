@@ -188,7 +188,7 @@ export default function PublicCards() {
       <div className="page-header">
         <h1 className="page-title">Card Catalogue</h1>
         <p className="page-subtitle">
-          Live TCGPlayer market prices · {loading ? '…' : `${cards.length} cards`} · Tick cards you're interested in to send a purchase request
+          Live TCGPlayer market prices · Check the boxes next to cards you're interested in to send a purchase request
         </p>
       </div>
 
@@ -328,13 +328,13 @@ export default function PublicCards() {
           <table className="data-table" style={{ minWidth: 560 }}>
             <thead>
               <tr>
-                <th style={{ width: 32 }}></th>
+                <th style={{ width: 32, fontSize: 11, color: 'var(--text-muted)', fontWeight: 400 }}>Request</th>
                 <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('name')}>Card{arrow('name')}</th>
                 <th>Set</th>
                 <th>Rarity</th>
                 <th style={{ textAlign: 'right', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('tcgplayer_market')}>TCG Price{arrow('tcgplayer_market')}</th>
                 <th style={{ textAlign: 'right', cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('quantity_owned')}>In Stock{arrow('quantity_owned')}</th>
-                <th style={{ textAlign: 'right' }}>eBay Listing</th>
+                <th style={{ textAlign: 'right' }}>Buy Now</th>
               </tr>
             </thead>
             <tbody>
@@ -363,7 +363,7 @@ export default function PublicCards() {
                             </div>
                           : <div style={{ width: 32, height: 44, background: 'var(--bg-raised)', borderRadius: 3, flexShrink: 0 }} />
                         }
-                        <span>{c.name}{c.foil ? ' ✦' : ''}</span>
+                        <span>{c.name}{c.foil && !c.name.toLowerCase().includes('foil') ? ' ✦' : ''}</span>
                       </Link>
                     </td>
                     <td className="set-cell">{c.set_name}</td>
@@ -374,7 +374,7 @@ export default function PublicCards() {
                     </td>
                     <td style={{ textAlign: 'right' }}>
                       {c.tcgplayer_market != null ? (
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
                           <span style={{ color: 'var(--gold)' }}>{usd(c.tcgplayer_market)}</span>
                           {changeMap.has(c.id) && (() => {
                             const ch = changeMap.get(c.id)
@@ -384,7 +384,7 @@ export default function PublicCards() {
                               </span>
                             )
                           })()}
-                        </span>
+                        </div>
                       ) : (
                         <span className="text-muted">—</span>
                       )}
@@ -401,9 +401,9 @@ export default function PublicCards() {
                         const l = ebayMap.get(c.id)
                         if (!l?.ebay_url) return <span className="text-muted">—</span>
                         return (
-                          <a href={l.ebay_url} target="_blank" rel="noreferrer" className="btn btn-primary"
-                            style={{ fontSize: 11, padding: '4px 10px', whiteSpace: 'nowrap', textDecoration: 'none' }}>
-                            Buy Now {usd(l.listed_price)}
+                          <a href={l.ebay_url} target="_blank" rel="noreferrer"
+                            style={{ display: 'inline-block', border: '1px solid var(--gold)', borderRadius: 'var(--radius-sm)', padding: '3px 10px', color: 'var(--gold)', fontSize: 12, textDecoration: 'none', whiteSpace: 'nowrap' }}>
+                            {usd(l.listed_price)} ↗
                           </a>
                         )
                       })()}
