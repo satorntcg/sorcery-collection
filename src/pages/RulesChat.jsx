@@ -315,7 +315,7 @@ export default function RulesChat() {
       <div style={{ marginTop: 10, fontSize: 11, color: 'var(--text-muted)', textAlign: 'center' }}>
         {mode === 'mtg'
           ? 'Sourced from the MTG-to-Sorcery guide · Always verify with official sources'
-          : 'Sourced from the official Sorcery rulebook · Always verify with your playgroup'}
+          : 'Sourced from the official Sorcery rulebook + card FAQ · Always verify with your playgroup'}
       </div>
     </div>
   )

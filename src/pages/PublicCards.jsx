@@ -29,7 +29,7 @@ export default function PublicCards() {
       const [{ data: cardData }, { data: singleData }, { data: lotData }, { data: changeData }] = await Promise.all([
         supabase
           .from('v_inventory_dashboard')
-          .select('id, name, set_name, rarity, foil, condition, tcgplayer_market, quantity_owned, image_url, tcgplayer_id')
+          .select('id, name, set_name, rarity, foil, condition, tcgplayer_market, quantity_owned, quantity_available, image_url, tcgplayer_id')
           .order('name'),
         // single-card listings
         supabase
@@ -84,7 +84,7 @@ export default function PublicCards() {
       if (search && !c.name?.toLowerCase().includes(search.toLowerCase())) return false
       if (rarityFilter !== 'all' && c.rarity !== rarityFilter) return false
       if (setFilter !== 'all' && c.set_name !== setFilter) return false
-      if (ebayOnly && !ebayMap.has(c.id)) return false
+      if (ebayOnly && (c.quantity_owned ?? 0) === 0) return false
       if (foilFilter === 'foil' && !c.foil) return false
       if (foilFilter === 'non-foil' && c.foil) return false
       return true
@@ -237,7 +237,7 @@ export default function PublicCards() {
             onChange={e => setEbayOnly(e.target.checked)}
             style={{ accentColor: 'var(--gold)', width: 15, height: 15, cursor: 'pointer' }}
           />
-          eBay listings only
+          In Stock
         </label>
       </div>
 

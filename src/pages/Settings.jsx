@@ -34,7 +34,7 @@ export default function Settings() {
     // 3. Active lot listing cards (via junction table)
     const { data: lotCards } = await supabase
       .from('ebay_listing_cards')
-      .select('card_id, quantity, ebay_listings!listing_id(status)')
+      .select('card_id, quantity, ebay_listings!listing_id(status, card_id)')
 
     // Build actual listed count map
     const actualMap = {}
@@ -42,7 +42,8 @@ export default function Settings() {
       actualMap[l.card_id] = (actualMap[l.card_id] ?? 0) + 1
     }
     for (const lc of (lotCards ?? [])) {
-      if (lc.ebay_listings?.status === 'active' && lc.card_id) {
+      // Skip if the parent listing has card_id set — already counted via singleListings
+      if (lc.ebay_listings?.status === 'active' && lc.card_id && !lc.ebay_listings?.card_id) {
         actualMap[lc.card_id] = (actualMap[lc.card_id] ?? 0) + (lc.quantity ?? 1)
       }
     }
