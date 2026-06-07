@@ -424,9 +424,12 @@ export default function PublicCards() {
           padding: '12px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           zIndex: 100, boxShadow: '0 -8px 32px rgba(0,0,0,0.8)',
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
             <span style={{ fontFamily: 'var(--font-display)', color: 'var(--gold)', fontSize: 14 }}>
               {[...wantList.values()].reduce((s, q) => s + q, 0)} card{[...wantList.values()].reduce((s, q) => s + q, 0) !== 1 ? 's' : ''} selected
+            </span>
+            <span style={{ fontSize: 13, color: 'var(--gold)', fontWeight: 600 }}>
+              {usd(wantCards.reduce((sum, c) => sum + ((c.tcgplayer_market ?? 0) * (wantList.get(c.id) ?? 1)), 0))}
             </span>
             <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
               {wantCards.map(c => c.name + (c.foil ? ' ✦' : '')).slice(0, 3).join(', ')}
@@ -489,6 +492,12 @@ export default function PublicCards() {
                           </div>
                         )
                       })}
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 8, fontSize: 13 }}>
+                      <span style={{ color: 'var(--text-muted)', marginRight: 8 }}>Total TCG value:</span>
+                      <span className="text-gold" style={{ fontWeight: 600 }}>
+                        {usd(wantCards.reduce((sum, c) => sum + ((c.tcgplayer_market ?? 0) * (wantList.get(c.id) ?? 1)), 0))}
+                      </span>
                     </div>
                   </div>
 

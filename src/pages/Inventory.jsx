@@ -23,6 +23,37 @@ const CONDITION_MAP = {
   damaged:           (foil) => foil ? 'Damaged Foil'           : 'Damaged',
 }
 
+function exportInventoryCSV(cards) {
+  const escape = v => {
+    const s = String(v ?? '')
+    return s.includes(',') || s.includes('"') || s.includes('\n')
+      ? `"${s.replace(/"/g, '""')}"` : s
+  }
+  const headers = ['Name', 'Set', 'Rarity', 'Condition', 'Foil', 'Qty Owned', 'Qty Listed', 'Cost Basis', 'TCG Market', 'Market Value', 'Unrealised P&L', 'Notes']
+  const rows = cards.map(c => [
+    c.name ?? '',
+    c.set_name ?? '',
+    c.rarity ?? '',
+    c.condition?.replace(/_/g, ' ') ?? '',
+    c.foil ? 'Yes' : 'No',
+    c.quantity_owned ?? 0,
+    c.quantity_listed ?? 0,
+    c.cost_basis != null ? Number(c.cost_basis).toFixed(2) : '',
+    c.tcgplayer_market != null ? Number(c.tcgplayer_market).toFixed(2) : '',
+    c.market_value != null ? Number(c.market_value).toFixed(2) : '',
+    c.unrealized_pnl != null ? Number(c.unrealized_pnl).toFixed(2) : '',
+    c.notes ?? '',
+  ])
+  const csv = [headers, ...rows].map(r => r.map(escape).join(',')).join('\n')
+  const blob = new Blob([csv], { type: 'text/csv' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `inventory-${new Date().toISOString().slice(0, 10)}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 function exportTCGPlayerCSV(cards) {
   const withId  = cards.filter(c => c.tcgplayer_id)
   const missing = cards.filter(c => !c.tcgplayer_id)
@@ -104,6 +135,9 @@ export default function Inventory() {
   const [selPackId, setSelPackId]   = useState('')
   const [newPackNumber, setNewPackNumber] = useState(1)
   const [inStockOnly, setInStockOnly]    = useState(false)
+  const [rarityFilter, setRarityFilter]  = useState('all')
+  const [setFilter,    setSetFilter]     = useState('all')
+  const [foilFilter,   setFoilFilter]    = useState('all')
   const [exportResult, setExportResult]  = useState(null)
   const [provenance, setProvenance]      = useState({})
   const [expanded, setExpanded]          = useState(new Set())
@@ -146,12 +180,21 @@ export default function Inventory() {
     setNewPackNumber(1)
   }
 
+  const sets = [...new Set(cards.map(c => c.set_name).filter(Boolean))].sort()
+
   const filtered = cards.filter(c => {
     const matchSearch = c.name?.toLowerCase().includes(search.toLowerCase()) ||
       c.set_name?.toLowerCase().includes(search.toLowerCase())
-    const matchStock = !inStockOnly || (c.quantity_owned ?? 0) > 0
-    return matchSearch && matchStock
+    const matchStock  = !inStockOnly || (c.quantity_owned ?? 0) > 0
+    const matchRarity = rarityFilter === 'all' || c.rarity === rarityFilter
+    const matchSet    = setFilter === 'all' || c.set_name === setFilter
+    const matchFoil   = foilFilter === 'all' || (foilFilter === 'foil' ? c.foil : !c.foil)
+    return matchSearch && matchStock && matchRarity && matchSet && matchFoil
   })
+
+  const totalValue     = filtered.reduce((sum, c) => sum + ((c.market_value ?? 0) * (c.quantity_owned ?? 1)), 0)
+  const totalValueUnit = filtered.reduce((sum, c) => sum + (c.market_value ?? 0), 0)
+  const totalCost      = filtered.reduce((sum, c) => sum + ((c.cost_basis ?? 0) * (c.quantity_owned ?? 1)), 0)
 
   function openAdd() {
     setForm(BLANK)
@@ -267,6 +310,13 @@ export default function Inventory() {
         <div className="flex gap-8">
           <button
             className="btn btn-ghost"
+            onClick={() => exportInventoryCSV(filtered)}
+            disabled={loading || filtered.length === 0}
+          >
+            ↓ Export CSV
+          </button>
+          <button
+            className="btn btn-ghost"
             onClick={() => setExportResult(exportTCGPlayerCSV(cards))}
             disabled={loading || cards.length === 0}
           >
@@ -277,14 +327,34 @@ export default function Inventory() {
       </div>
 
       {/* Search + filters */}
-      <div className="mb-16" style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+      <div className="mb-8" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
         <input
           className="form-input"
-          style={{ maxWidth: 320 }}
+          style={{ maxWidth: 280 }}
           placeholder="Search cards or sets…"
           value={search}
           onChange={e => setSearch(e.target.value)}
         />
+        <select className="form-select" style={{ maxWidth: 150 }} value={rarityFilter} onChange={e => setRarityFilter(e.target.value)}>
+          <option value="all">All Rarities</option>
+          {RARITIES.map(r => <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>)}
+        </select>
+        <select className="form-select" style={{ maxWidth: 160 }} value={setFilter} onChange={e => setSetFilter(e.target.value)}>
+          <option value="all">All Sets</option>
+          {sets.map(s => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <div style={{ display: 'flex', background: 'var(--bg-deep)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: 3, gap: 2 }}>
+          {['all', 'non-foil', 'foil'].map(v => (
+            <button key={v} onClick={() => setFoilFilter(v)} style={{
+              padding: '3px 10px', fontSize: 12, border: 'none', borderRadius: 'calc(var(--radius-sm) - 2px)', cursor: 'pointer',
+              background: foilFilter === v ? 'var(--gold)' : 'transparent',
+              color: foilFilter === v ? 'var(--bg-void)' : 'var(--text-secondary)',
+              fontWeight: foilFilter === v ? 600 : 400,
+            }}>
+              {v === 'all' ? 'All' : v === 'foil' ? '✦ Foil' : 'Non-Foil'}
+            </button>
+          ))}
+        </div>
         <button
           className={`btn btn-sm ${inStockOnly ? 'btn-primary' : 'btn-ghost'}`}
           onClick={() => setInStockOnly(v => !v)}
@@ -292,6 +362,23 @@ export default function Inventory() {
           {inStockOnly ? '✓ In stock only' : 'In stock only'}
         </button>
       </div>
+
+      {/* Running totals */}
+      {!loading && (
+        <div style={{ display: 'flex', gap: 24, marginBottom: 16, fontSize: 13, color: 'var(--text-muted)', flexWrap: 'wrap', alignItems: 'center' }}>
+          <span>{filtered.length} card{filtered.length !== 1 ? 's' : ''}</span>
+          <span>
+            Market value:{' '}
+            <span className="text-gold" style={{ fontWeight: 600 }}>${totalValue.toFixed(2)}</span>
+            <span style={{ color: 'var(--text-muted)', margin: '0 4px' }}>·</span>
+            <span title="1× each card" style={{ color: 'var(--text-secondary)' }}>${totalValueUnit.toFixed(2)} ×1</span>
+          </span>
+          <span>Cost basis: <span style={{ color: 'var(--text-secondary)' }}>${totalCost.toFixed(2)}</span></span>
+          <span style={{ color: totalValue - totalCost >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+            Unrealised P&L: {totalValue - totalCost >= 0 ? '+' : ''}${(totalValue - totalCost).toFixed(2)}
+          </span>
+        </div>
+      )}
 
       {loading ? (
         <div className="loading">Loading inventory…</div>
