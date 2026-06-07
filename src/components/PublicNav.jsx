@@ -27,9 +27,9 @@ export default function PublicNav({ session }) {
   useEffect(() => { setMenuOpen(false) }, [location.pathname])
 
   const links = [
-    { to: '/cards',   label: 'Card Prices' },
-    { to: '/rules',   label: 'Rules Assistant' },
+    { to: '/cards',   label: 'Card Catalogue' },
     { to: '/videos',  label: 'Pack Openings' },
+    { to: '/rules',   label: 'Rules Assistant' },
     { to: '/contact', label: 'Contact' },
   ]
 

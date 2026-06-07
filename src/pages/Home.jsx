@@ -129,22 +129,7 @@ export default function Home() {
         gap: '16px',
       }}>
 
-        {/* Rules Assistant */}
-        <div className="panel" style={{ padding: '24px' }}>
-          <div style={{ width: 44, height: 44, borderRadius: 10, background: 'linear-gradient(135deg, var(--gold-dim), var(--gold))', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--bg-void)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
-              <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
-            </svg>
-          </div>
-          <div style={{ fontFamily: 'var(--font-display)', fontSize: '15px', color: 'var(--gold-light)', marginBottom: '8px' }}>Rules Assistant</div>
-          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.65, marginBottom: '16px' }}>
-            Ask any question about Sorcery rules. Powered by the official rulebook and AI.
-          </p>
-          <Link to="/rules" style={{ color: 'var(--gold)', fontSize: '13px', textDecoration: 'none' }}>Ask the Assistant →</Link>
-        </div>
-
-        {/* Card Prices */}
+        {/* Card Catalogue */}
         <div className="panel" style={{ padding: '24px' }}>
           <div style={{ width: 44, height: 44, borderRadius: 10, background: 'linear-gradient(135deg, var(--gold-dim), var(--gold))', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--bg-void)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -152,11 +137,11 @@ export default function Home() {
               <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
             </svg>
           </div>
-          <div style={{ fontFamily: 'var(--font-display)', fontSize: '15px', color: 'var(--gold-light)', marginBottom: '8px' }}>Card Prices</div>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: '15px', color: 'var(--gold-light)', marginBottom: '8px' }}>Card Catalogue</div>
           <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.65, marginBottom: '16px' }}>
             Browse all cards with live TCGPlayer market prices and in-stock availability.
           </p>
-          <Link to="/cards" style={{ color: 'var(--gold)', fontSize: '13px', textDecoration: 'none' }}>View Card Prices →</Link>
+          <Link to="/cards" style={{ color: 'var(--gold)', fontSize: '13px', textDecoration: 'none' }}>View Card Catalogue →</Link>
         </div>
 
         {/* Pack Openings */}
@@ -171,6 +156,21 @@ export default function Home() {
             Watch pack opening videos and see exactly what cards were pulled, with live TCG values.
           </p>
           <Link to="/videos" style={{ color: 'var(--gold)', fontSize: '13px', textDecoration: 'none' }}>Watch Openings →</Link>
+        </div>
+
+        {/* Rules Assistant */}
+        <div className="panel" style={{ padding: '24px' }}>
+          <div style={{ width: 44, height: 44, borderRadius: 10, background: 'linear-gradient(135deg, var(--gold-dim), var(--gold))', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--bg-void)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+              <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+            </svg>
+          </div>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: '15px', color: 'var(--gold-light)', marginBottom: '8px' }}>Rules Assistant</div>
+          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.65, marginBottom: '16px' }}>
+            Ask any question about Sorcery rules. Powered by the official rulebook and AI.
+          </p>
+          <Link to="/rules" style={{ color: 'var(--gold)', fontSize: '13px', textDecoration: 'none' }}>Ask the Assistant →</Link>
         </div>
 
       </section>

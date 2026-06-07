@@ -30,7 +30,7 @@ export default function PublicCards() {
   const [wantError,      setWantError]      = useState('')
 
   useEffect(() => {
-    document.title = 'Card Prices — SatornTCG'
+    document.title = 'Card Catalogue — SatornTCG'
 
     async function fetchAll() {
       setLoading(true)
@@ -186,7 +186,7 @@ export default function PublicCards() {
 
       {/* Page header */}
       <div className="page-header">
-        <h1 className="page-title">Card Prices</h1>
+        <h1 className="page-title">Card Catalogue</h1>
         <p className="page-subtitle">
           Live TCGPlayer market prices · {loading ? '…' : `${cards.length} cards`} · Tick cards you're interested in to send a purchase request
         </p>
