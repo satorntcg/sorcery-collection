@@ -304,8 +304,14 @@ CREATE OR REPLACE VIEW public.v_price_gainers_losers AS
             price_snapshots.tcgplayer_market AS price_7d_ago,
             price_snapshots.checked_at AS checked_at_7d
            FROM price_snapshots
-          WHERE ((price_snapshots.tcgplayer_market IS NOT NULL) AND (price_snapshots.checked_at <= (now() - '2 days'::interval)))
-          ORDER BY price_snapshots.card_id, price_snapshots.checked_at
+          WHERE ((price_snapshots.tcgplayer_market IS NOT NULL) AND (price_snapshots.checked_at <= (now() - '3 days'::interval)))
+          ORDER BY price_snapshots.card_id,
+            CASE
+              WHEN price_snapshots.checked_at <= (now() - '7 days'::interval) THEN 1
+              WHEN price_snapshots.checked_at <= (now() - '5 days'::interval) THEN 2
+              ELSE 3
+            END ASC,
+            price_snapshots.checked_at DESC
         )
  SELECT c.id AS card_id,
     c.name,
@@ -322,8 +328,8 @@ CREATE OR REPLACE VIEW public.v_price_gainers_losers AS
    FROM ((latest l
      JOIN week_ago w ON ((w.card_id = l.card_id)))
      JOIN cards c ON ((c.id = l.card_id)))
-  WHERE ((w.price_7d_ago > (0)::numeric) AND (l.tcgplayer_market <> w.price_7d_ago) AND (abs((l.tcgplayer_market - w.price_7d_ago)) >= 0.50) AND (abs(((l.tcgplayer_market - w.price_7d_ago) / w.price_7d_ago)) >= 0.10))
-  ORDER BY (abs((l.tcgplayer_market - w.price_7d_ago))) DESC;
+  WHERE ((w.price_7d_ago > (0)::numeric) AND (l.tcgplayer_market <> w.price_7d_ago) AND (abs(((l.tcgplayer_market - w.price_7d_ago) / w.price_7d_ago)) >= 0.05) AND (CASE WHEN l.tcgplayer_market > w.price_7d_ago THEN (l.tcgplayer_market - w.price_7d_ago) >= 0.10 ELSE (w.price_7d_ago - l.tcgplayer_market) >= 0.05 END))
+  ORDER BY (abs(((l.tcgplayer_market - w.price_7d_ago) / w.price_7d_ago))) DESC;
 
 CREATE OR REPLACE VIEW public.v_price_highs AS
  WITH all_time_high AS (

@@ -192,8 +192,8 @@ export default function Inventory() {
     return matchSearch && matchStock && matchRarity && matchSet && matchFoil
   })
 
-  const totalValue     = filtered.reduce((sum, c) => sum + ((c.market_value ?? 0) * (c.quantity_owned ?? 1)), 0)
-  const totalValueUnit = filtered.reduce((sum, c) => sum + (c.market_value ?? 0), 0)
+  const totalValue     = filtered.reduce((sum, c) => sum + ((c.tcgplayer_market ?? 0) * (c.quantity_owned ?? 1)), 0)
+  const totalValueUnit = filtered.filter(c => (c.quantity_owned ?? 0) > 0).reduce((sum, c) => sum + (c.tcgplayer_market ?? 0), 0)
   const totalCost      = filtered.reduce((sum, c) => sum + ((c.cost_basis ?? 0) * (c.quantity_owned ?? 1)), 0)
 
   function openAdd() {
@@ -368,7 +368,7 @@ export default function Inventory() {
         <div style={{ display: 'flex', gap: 24, marginBottom: 16, fontSize: 13, color: 'var(--text-muted)', flexWrap: 'wrap', alignItems: 'center' }}>
           <span>{filtered.length} card{filtered.length !== 1 ? 's' : ''}</span>
           <span>
-            Market value:{' '}
+            TCG value:{' '}
             <span className="text-gold" style={{ fontWeight: 600 }}>${totalValue.toFixed(2)}</span>
             <span style={{ color: 'var(--text-muted)', margin: '0 4px' }}>·</span>
             <span title="1× each card" style={{ color: 'var(--text-secondary)' }}>${totalValueUnit.toFixed(2)} ×1</span>

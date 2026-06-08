@@ -190,25 +190,18 @@ export default function CardDetail() {
             <div style={{ textTransform: 'uppercase', fontSize: '11px', letterSpacing: '0.08em', color: 'var(--text-muted)', marginBottom: '12px' }}>
               TCGPlayer
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px', marginBottom: '20px' }}>
-              <div>
-                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Market</div>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
-                  <span style={{ fontSize: '20px', fontWeight: 600, color: 'var(--gold)' }}>{usd(card.tcgplayer_market)}</span>
-                  {priceChange != null && (
-                    <span style={{ fontSize: 11, color: priceChange > 0 ? 'var(--success)' : 'var(--danger)', whiteSpace: 'nowrap' }}>
-                      {priceChange > 0 ? '▲' : '▼'} ${Math.abs(priceChange).toFixed(2)}
-                    </span>
-                  )}
-                </div>
+            <div style={{ marginBottom: '20px' }}>
+              <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px', display: 'flex', alignItems: 'center', gap: 4 }}>
+                Market Price
+                <span title="Rolling average of recent completed sales on TCGplayer" style={{ cursor: 'help', opacity: 0.6, fontSize: 10 }}>ⓘ</span>
               </div>
-              <div>
-                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Mid</div>
-                <div style={{ fontSize: '18px', fontWeight: 500, color: 'var(--text-primary)' }}>{usd(card.tcgplayer_mid)}</div>
-              </div>
-              <div>
-                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Low</div>
-                <div style={{ fontSize: '18px', fontWeight: 500, color: 'var(--text-primary)' }}>{usd(card.tcgplayer_low)}</div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: '20px', fontWeight: 600, color: 'var(--gold)' }}>{usd(card.tcgplayer_market)}</span>
+                {priceChange != null && (
+                  <span style={{ fontSize: 11, color: priceChange > 0 ? 'var(--success)' : 'var(--danger)', whiteSpace: 'nowrap' }}>
+                    {priceChange > 0 ? '▲' : '▼'} ${Math.abs(priceChange).toFixed(2)}
+                  </span>
+                )}
               </div>
             </div>
             <div style={{ borderTop: '1px solid var(--border)', paddingTop: '16px' }}>
