@@ -133,7 +133,7 @@ export default function CardDetail() {
       <div style={{ display: 'flex', gap: '32px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
 
         {/* LEFT: Image */}
-        <div style={{ flexShrink: 0 }}>
+        <div style={{ flexShrink: 0, width: 'min(300px, 100%)' }}>
           {(card.image_url || card.tcgplayer_id) ? (
             <div style={{
               width: 'min(300px, 100%)', height: 'auto', aspectRatio: '5/7',
@@ -175,7 +175,7 @@ export default function CardDetail() {
               target="_blank"
               rel="noreferrer"
               className="btn btn-ghost btn-sm"
-              style={{ display: 'block', textAlign: 'center', marginTop: 10, textDecoration: 'none' }}
+              style={{ display: 'block', textAlign: 'center', marginTop: 6, textDecoration: 'none', width: '100%', boxSizing: 'border-box' }}
             >
               View on TCGPlayer ↗
             </a>
@@ -269,7 +269,7 @@ export default function CardDetail() {
                   {card.quantity_owned} available
                 </span>
               ) : (
-                <span style={{ color: 'var(--text-muted)' }}>Out of stock</span>
+                <span style={{ color: 'var(--text-muted)' }}>None</span>
               )}
             </div>
           </div>
