@@ -240,6 +240,7 @@ export default function Home() {
               const m   = s.shorts_url?.match(/shorts\/([a-zA-Z0-9_-]{11})/) || s.shorts_url?.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/)
               const ytId = m?.[1]
               const thumb = ytId ? `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` : null
+              if (!thumb) return null
               return (
                 <a key={s.id} href={s.shorts_url} target="_blank" rel="noreferrer"
                   style={{ textDecoration: 'none', flex: '1 1 140px', maxWidth: 180 }}>

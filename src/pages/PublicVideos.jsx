@@ -95,6 +95,7 @@ export default function PublicVideos() {
               ? new Date(v.filmed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
               : null
 
+            if (!thumb) return null
             return (
               <div key={v.id} className="panel" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
 
