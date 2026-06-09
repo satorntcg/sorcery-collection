@@ -5,7 +5,7 @@ const usd = n => n == null ? '—' : `$${Number(n).toFixed(2)}`
 
 function getYouTubeId(url) {
   if (!url) return null
-  const m = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/)
+  const m = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/shorts\/)([a-zA-Z0-9_-]{11})/)
   return m?.[1] ?? null
 }
 
