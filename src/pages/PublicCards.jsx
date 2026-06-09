@@ -21,6 +21,8 @@ export default function PublicCards() {
   const [moversOpen, setMoversOpen] = useState(true)
   const [sortKey, setSortKey] = useState('tcgplayer_market')
   const [sortDir, setSortDir] = useState('desc')
+  const [page, setPage]       = useState(0)
+  const PAGE_SIZE = 100
 
   // Want list state
   const [wantList,       setWantList]       = useState(new Map())
@@ -34,11 +36,20 @@ export default function PublicCards() {
 
     async function fetchAll() {
       setLoading(true)
-      const [{ data: cardData }, { data: singleData }, { data: lotData }, { data: changeData }] = await Promise.all([
-        supabase
+      // Fetch all cards in batches to bypass 1000-row limit
+      let allCardData = [], batchPage = 0
+      while (true) {
+        const { data: batch } = await supabase
           .from('v_inventory_dashboard')
           .select('id, name, set_name, rarity, foil, condition, tcgplayer_market, quantity_owned, quantity_available, image_url, tcgplayer_id')
-          .order('name'),
+          .order('name')
+          .range(batchPage * 1000, (batchPage + 1) * 1000 - 1)
+        allCardData = [...allCardData, ...(batch ?? [])]
+        if (!batch || batch.length < 1000) break
+        batchPage++
+      }
+
+      const [{ data: singleData }, { data: lotData }, { data: changeData }] = await Promise.all([
         // single-card listings
         supabase
           .from('ebay_listings')
@@ -52,7 +63,7 @@ export default function PublicCards() {
         // 7-day price changes
         supabase.from('v_price_gainers_losers').select('card_id, name, rarity, foil, current_price, price_7d_ago, pct_change'),
       ])
-      setCards(cardData ?? [])
+      setCards(allCardData)
       setChangeRaw(changeData ?? [])
 
       const cm = new Map()
@@ -111,6 +122,12 @@ export default function PublicCards() {
     const losers  = [...changeRaw].filter(r => r.pct_change < 0).sort((a, b) => dollarImpact(b) - dollarImpact(a)).slice(0, 3)
     return { gainers, losers }
   }, [changeRaw])
+
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE)
+  const safePage   = Math.min(page, Math.max(0, totalPages - 1))
+  const paginated  = filtered.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE)
+
+  useEffect(() => { setPage(0) }, [search, rarityFilter, setFilter, ebayOnly, foilFilter, sortKey, sortDir])
 
   function toggleSort(key) {
     if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
@@ -338,7 +355,7 @@ export default function PublicCards() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map(c => {
+              {paginated.map(c => {
                 const isWanted = wantList.has(c.id)
                 return (
                   <tr key={c.id} style={isWanted ? { background: 'rgba(201,168,76,0.06)' } : undefined}>
@@ -413,6 +430,17 @@ export default function PublicCards() {
               })}
             </tbody>
           </table>
+          {totalPages > 1 && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, padding: '12px 16px', borderTop: '1px solid var(--border)' }}>
+              <button className="btn btn-ghost btn-sm" onClick={() => setPage(0)} disabled={safePage === 0}>«</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={safePage === 0}>‹ Prev</button>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                Page {safePage + 1} of {totalPages} · {filtered.length} cards
+              </span>
+              <button className="btn btn-ghost btn-sm" onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={safePage === totalPages - 1}>Next ›</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setPage(totalPages - 1)} disabled={safePage === totalPages - 1}>»</button>
+            </div>
+          )}
         </div>
       )}
 

@@ -141,14 +141,24 @@ export default function Inventory() {
   const [exportResult, setExportResult]  = useState(null)
   const [provenance, setProvenance]      = useState({})
   const [expanded, setExpanded]          = useState(new Set())
+  const [page, setPage]                  = useState(0)
+  const PAGE_SIZE = 100
 
   async function load() {
     setLoading(true)
-    const [{ data: cardData }, { data: packLinks }] = await Promise.all([
-      supabase.from('v_inventory_dashboard').select('*').order('name'),
+    // Fetch all cards in batches to bypass the 1000-row default limit
+    let allCards = [], batchPage = 0
+    while (true) {
+      const { data } = await supabase.from('v_inventory_dashboard').select('*').order('name')
+        .range(batchPage * 1000, (batchPage + 1) * 1000 - 1)
+      allCards = [...allCards, ...(data ?? [])]
+      if (!data || data.length < 1000) break
+      batchPage++
+    }
+    const [{ data: packLinks }] = await Promise.all([
       supabase.from('pack_cards').select('card_id, quantity, packs(pack_number, pack_ref, boxes(name, set_name))'),
     ])
-    setCards(cardData ?? [])
+    setCards(allCards)
 
     const provMap = {}
     for (const link of (packLinks ?? [])) {
@@ -182,6 +192,8 @@ export default function Inventory() {
 
   const sets = [...new Set(cards.map(c => c.set_name).filter(Boolean))].sort()
 
+  useEffect(() => { setPage(0) }, [search, inStockOnly, rarityFilter, setFilter, foilFilter])
+
   const filtered = cards.filter(c => {
     const matchSearch = c.name?.toLowerCase().includes(search.toLowerCase()) ||
       c.set_name?.toLowerCase().includes(search.toLowerCase())
@@ -195,6 +207,10 @@ export default function Inventory() {
   const totalValue     = filtered.reduce((sum, c) => sum + ((c.tcgplayer_market ?? 0) * (c.quantity_owned ?? 1)), 0)
   const totalValueUnit = filtered.filter(c => (c.quantity_owned ?? 0) > 0).reduce((sum, c) => sum + (c.tcgplayer_market ?? 0), 0)
   const totalCost      = filtered.reduce((sum, c) => sum + ((c.cost_basis ?? 0) * (c.quantity_owned ?? 1)), 0)
+
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE)
+  const safePage   = Math.min(page, Math.max(0, totalPages - 1))
+  const paginated  = filtered.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE)
 
   function openAdd() {
     setForm(BLANK)
@@ -405,7 +421,7 @@ export default function Inventory() {
               </tr>
             </thead>
             <tbody>
-              {filtered.map(card => {
+              {paginated.map(card => {
                 const id   = card.card_id ?? card.id
                 const prov = provenance[id] ?? []
                 const isExpanded = expanded.has(id)
@@ -475,6 +491,17 @@ export default function Inventory() {
               })}
             </tbody>
           </table>
+          {totalPages > 1 && (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, padding: '12px 16px', borderTop: '1px solid var(--border)' }}>
+              <button className="btn btn-ghost btn-sm" onClick={() => setPage(0)} disabled={safePage === 0}>«</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={safePage === 0}>‹ Prev</button>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                Page {safePage + 1} of {totalPages} · {filtered.length} cards
+              </span>
+              <button className="btn btn-ghost btn-sm" onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={safePage === totalPages - 1}>Next ›</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => setPage(totalPages - 1)} disabled={safePage === totalPages - 1}>»</button>
+            </div>
+          )}
         </div>
       )}
 
