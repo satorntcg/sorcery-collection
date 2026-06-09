@@ -38,64 +38,81 @@ export default function Home() {
     <div style={{ maxWidth: '900px', margin: '0 auto', padding: '16px 24px' }}>
 
       {/* Section 1 — Hero */}
-      <section style={{ display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
+      <section style={{ display: 'flex', alignItems: 'flex-start', gap: 24, flexWrap: 'wrap', paddingTop: 4, paddingBottom: 4 }}>
 
         {/* Left: text */}
-        <div style={{ flex: '1 1 300px' }}>
+        <div style={{ flex: '1 1 280px' }}>
           <p style={{
             textTransform: 'uppercase',
             color: 'var(--gold)',
-            fontSize: '12px',
+            fontSize: '11px',
             letterSpacing: '0.12em',
-            marginBottom: '8px',
+            marginBottom: '6px',
           }}>
             Sorcery: Contested Realm
           </p>
           <h1 style={{
             fontFamily: 'var(--font-display)',
-            fontSize: 'clamp(32px, 5vw, 52px)',
+            fontSize: 'clamp(22px, 3vw, 36px)',
             color: 'var(--text-primary)',
             lineHeight: 1.15,
-            marginBottom: '10px',
+            marginBottom: '8px',
           }}>
             Track. Price. Sell.
           </h1>
           <p style={{
             color: 'var(--text-secondary)',
-            fontSize: '16px',
+            fontSize: '14px',
             lineHeight: 1.6,
-            marginBottom: '20px',
+            margin: '0 0 12px',
           }}>
             Live TCGPlayer prices, eBay sales data, and pack opening stats — all in one place. Built for Sorcery: Contested Realm players.
           </p>
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 }}>
+            {/* eBay Follow */}
             <a
               href="https://www.ebay.com/str/satorntcg"
               target="_blank" rel="noreferrer"
-              className="btn btn-primary"
-              style={{ textDecoration: 'none', fontSize: 13 }}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 7,
+                background: '#0064D2', color: '#fff',
+                padding: '8px 16px', borderRadius: 6,
+                textDecoration: 'none', fontSize: 13, fontWeight: 600,
+              }}
             >
-              Browse eBay Store →
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="white">
+                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+              </svg>
+              Follow on eBay
             </a>
+            {/* YouTube Subscribe */}
             <a
-              href="https://www.youtube.com/@SatornTCG"
+              href="https://www.youtube.com/@SatornTCG?sub_confirmation=1"
               target="_blank" rel="noreferrer"
-              className="btn btn-ghost"
-              style={{ textDecoration: 'none', fontSize: 13, border: '1px solid var(--border)' }}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 7,
+                background: '#FF0000', color: '#fff',
+                padding: '8px 16px', borderRadius: 6,
+                textDecoration: 'none', fontSize: 13, fontWeight: 600,
+              }}
             >
-              Watch on YouTube →
+              <svg width="16" height="12" viewBox="0 0 24 17" fill="white">
+                <path d="M23.5 2.7A3 3 0 0 0 21.4.6C19.5.1 12 .1 12 .1S4.5.1 2.6.6A3 3 0 0 0 .5 2.7C0 4.6 0 8.5 0 8.5s0 3.9.5 5.8a3 3 0 0 0 2.1 2.1c1.9.5 9.4.5 9.4.5s7.5 0 9.4-.5a3 3 0 0 0 2.1-2.1C24 12.4 24 8.5 24 8.5s0-3.9-.5-5.8zM9.8 12V5l6.3 3.5L9.8 12z"/>
+              </svg>
+              Subscribe
             </a>
           </div>
+
         </div>
 
         {/* Right: card fan */}
         {heroCards.length > 0 && (
-          <div style={{ flex: '0 0 auto', position: 'relative', height: 360, width: 380, maxWidth: '100%' }}>
+          <div style={{ flex: '0 0 auto', position: 'relative', height: 300, width: 340, maxWidth: '100%' }}>
             {heroCards.slice(0, 5).map((card, i) => {
               const total   = Math.min(heroCards.length, 5)
               const mid     = (total - 1) / 2
               const angle   = (i - mid) * 12
-              const xOffset = (i - mid) * 32
+              const xOffset = (i - mid) * 28
               const imgSrc  = card.image_url || `https://product-images.tcgplayer.com/fit-in/400x558/${card.tcgplayer_id}.jpg`
               return (
                 <Link
@@ -115,7 +132,7 @@ export default function Home() {
                   onMouseLeave={e => { e.currentTarget.style.transform = `translate(calc(-50% + ${xOffset}px), -50%) rotate(${angle}deg)`; e.currentTarget.style.zIndex = i === Math.floor(mid) ? 5 : 4 - Math.abs(i - Math.floor(mid)) }}
                 >
                   <div style={{
-                    width: 160, height: 224,
+                    width: 140, height: 196,
                     borderRadius: 12,
                     overflow: 'hidden',
                     border: '2px solid var(--bg-deep)',
@@ -142,7 +159,7 @@ export default function Home() {
 
       {/* Section 2 — Feature cards */}
       <section style={{
-        marginTop: '16px',
+        marginTop: '8px',
         display: 'grid',
         gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
         gap: '16px',
@@ -175,21 +192,6 @@ export default function Home() {
             Watch pack opening videos and see exactly what cards were pulled, with live TCG values.
           </p>
           <Link to="/videos" style={{ color: 'var(--gold)', fontSize: '13px', textDecoration: 'none' }}>Watch Openings →</Link>
-        </div>
-
-        {/* Rules Assistant */}
-        <div className="panel" style={{ padding: '24px' }}>
-          <div style={{ width: 44, height: 44, borderRadius: 10, background: 'linear-gradient(135deg, var(--gold-dim), var(--gold))', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
-            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--bg-void)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
-              <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
-            </svg>
-          </div>
-          <div style={{ fontFamily: 'var(--font-display)', fontSize: '15px', color: 'var(--gold-light)', marginBottom: '8px' }}>Rules Assistant</div>
-          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.65, marginBottom: '16px' }}>
-            Ask any question about Sorcery rules. Powered by the official rulebook and AI.
-          </p>
-          <Link to="/rules" style={{ color: 'var(--gold)', fontSize: '13px', textDecoration: 'none' }}>Ask the Assistant →</Link>
         </div>
 
         {/* eBay Store */}

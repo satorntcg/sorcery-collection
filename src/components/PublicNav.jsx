@@ -29,6 +29,7 @@ export default function PublicNav({ session }) {
   const links = [
     { to: '/cards',   label: 'Card Catalogue' },
     { to: '/videos',  label: 'Pack Openings' },
+    { href: 'https://www.ebay.com/str/satorntcg', label: 'eBay Store', external: true },
     { to: '/rules',   label: 'Rules Assistant' },
     { to: '/contact', label: 'Contact' },
   ]
@@ -54,11 +55,10 @@ export default function PublicNav({ session }) {
         {/* Desktop links */}
         {!isMobile && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-            {links.map(l => (
-              <NavLink key={l.to} to={l.to} style={({ isActive }) => navLinkStyle(isActive)}>
-                {l.label}
-              </NavLink>
-            ))}
+            {links.map(l => l.external
+              ? <a key={l.href} href={l.href} target="_blank" rel="noreferrer" style={navLinkStyle(false)}>{l.label}</a>
+              : <NavLink key={l.to} to={l.to} style={({ isActive }) => navLinkStyle(isActive)}>{l.label}</NavLink>
+            )}
           </div>
         )}
 
@@ -95,11 +95,10 @@ export default function PublicNav({ session }) {
           padding: '8px 16px 16px',
           display: 'flex', flexDirection: 'column', gap: 2,
         }}>
-          {links.map(l => (
-            <NavLink key={l.to} to={l.to} style={({ isActive }) => navLinkStyle(isActive)}>
-              {l.label}
-            </NavLink>
-          ))}
+          {links.map(l => l.external
+            ? <a key={l.href} href={l.href} target="_blank" rel="noreferrer" style={navLinkStyle(false)}>{l.label}</a>
+            : <NavLink key={l.to} to={l.to} style={({ isActive }) => navLinkStyle(isActive)}>{l.label}</NavLink>
+          )}
           <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
             {session
               ? <Link to="/dashboard" className="btn btn-primary btn-sm" style={{ display: 'block', textAlign: 'center' }}>Dashboard →</Link>
