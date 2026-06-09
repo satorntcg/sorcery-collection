@@ -22,8 +22,6 @@ export default function PublicVideos() {
       .then(({ data }) => { setVideos(data ?? []); setLoading(false) })
   }, [])
 
-  const totalValue  = videos.reduce((s, v) => s + (v.total_tcg_value ?? 0), 0)
-  const totalPacks  = videos.reduce((s, v) => s + (v.packs_in_video  ?? 0), 0)
 
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '32px 24px' }}>
@@ -55,25 +53,6 @@ export default function PublicVideos() {
         </a>
       </div>
 
-      {/* Stats bar */}
-      {!loading && videos.length > 0 && (
-        <div className="panel" style={{ display: 'flex', flexWrap: 'wrap', gap: 0, marginTop: 20, padding: '16px 24px' }}>
-          {[
-            { label: 'Videos',      value: videos.length },
-            { label: 'Packs Opened', value: totalPacks },
-            { label: 'Total TCG Value Pulled', value: usd(totalValue) },
-          ].map((s, i) => (
-            <div key={i} style={{
-              flex: 1, textAlign: 'center',
-              borderRight: i < 2 ? '1px solid var(--border)' : 'none',
-              padding: '4px 16px',
-            }}>
-              <div style={{ fontSize: 22, fontWeight: 600, color: 'var(--gold)' }}>{s.value}</div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{s.label}</div>
-            </div>
-          ))}
-        </div>
-      )}
 
       {/* Grid */}
       {loading ? (
@@ -167,28 +146,6 @@ export default function PublicVideos() {
                     )}
                   </div>
 
-                  {/* Watch button */}
-                  {v.youtube_url && (
-                    <a
-                      href={v.youtube_url}
-                      target="_blank"
-                      rel="noreferrer"
-                      style={{
-                        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-                        background: '#FF0000', color: '#fff',
-                        borderRadius: 'var(--radius-sm)',
-                        padding: '7px 0',
-                        textDecoration: 'none',
-                        fontSize: 12, fontWeight: 600,
-                        marginTop: 'auto',
-                      }}
-                    >
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
-                        <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
-                      </svg>
-                      Watch on YouTube
-                    </a>
-                  )}
                 </div>
               </div>
             )
