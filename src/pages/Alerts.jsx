@@ -267,7 +267,8 @@ export default function Alerts({ onDismiss }) {
                       <td className="text-right">{usd(l.listed_price)}</td>
                       <td className="text-right text-gold">{usd(l.tcgplayer_market)}</td>
                       <td className="text-right" style={{ color: l.alert_type === 'overpriced' ? 'var(--success)' : 'var(--danger)', fontWeight: 500 }}>
-                        {fmtPct(l.overpriced_pct)}
+                        <div>{fmtPct(l.overpriced_pct)}</div>
+                        <div style={{ fontSize: 11, fontWeight: 400, opacity: 0.8 }}>{fmtChg(l.listed_price - l.tcgplayer_market)}</div>
                       </td>
                       <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                         {l.alert_type === 'overpriced' ? `Consider lowering to ${usd(l.tcgplayer_market)}` : `Consider raising to ${usd(l.tcgplayer_market)}`}

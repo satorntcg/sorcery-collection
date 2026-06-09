@@ -64,9 +64,28 @@ export default function Home() {
             color: 'var(--text-secondary)',
             fontSize: '16px',
             lineHeight: 1.6,
+            marginBottom: '20px',
           }}>
             Live TCGPlayer prices, eBay sales data, and pack opening stats — all in one place. Built for Sorcery: Contested Realm players.
           </p>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+            <a
+              href="https://www.ebay.com/str/satorntcg"
+              target="_blank" rel="noreferrer"
+              className="btn btn-primary"
+              style={{ textDecoration: 'none', fontSize: 13 }}
+            >
+              Browse eBay Store →
+            </a>
+            <a
+              href="https://www.youtube.com/@SatornTCG"
+              target="_blank" rel="noreferrer"
+              className="btn btn-ghost"
+              style={{ textDecoration: 'none', fontSize: 13, border: '1px solid var(--border)' }}
+            >
+              Watch on YouTube →
+            </a>
+          </div>
         </div>
 
         {/* Right: card fan */}
@@ -171,6 +190,22 @@ export default function Home() {
             Ask any question about Sorcery rules. Powered by the official rulebook and AI.
           </p>
           <Link to="/rules" style={{ color: 'var(--gold)', fontSize: '13px', textDecoration: 'none' }}>Ask the Assistant →</Link>
+        </div>
+
+        {/* eBay Store */}
+        <div className="panel" style={{ padding: '24px' }}>
+          <div style={{ width: 44, height: 44, borderRadius: 10, background: 'linear-gradient(135deg, var(--gold-dim), var(--gold))', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--bg-void)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/>
+              <line x1="3" y1="6" x2="21" y2="6"/>
+              <path d="M16 10a4 4 0 0 1-8 0"/>
+            </svg>
+          </div>
+          <div style={{ fontFamily: 'var(--font-display)', fontSize: '15px', color: 'var(--gold-light)', marginBottom: '8px' }}>eBay Store</div>
+          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.65, marginBottom: '16px' }}>
+            Buy singles directly from SatornTCG. Competitively priced Gothic, Beta, Alpha, and Arthurian Legends cards.
+          </p>
+          <a href="https://www.ebay.com/str/satorntcg" target="_blank" rel="noreferrer" style={{ color: 'var(--gold)', fontSize: '13px', textDecoration: 'none' }}>Shop the Store →</a>
         </div>
 
       </section>
