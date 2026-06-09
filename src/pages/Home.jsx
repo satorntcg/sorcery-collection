@@ -12,13 +12,13 @@ export default function Home() {
     document.title = 'SatornTCG — Sorcery: Contested Realm Companion'
 
     async function fetchStats() {
-      const [heroRes, shortsRes] = await Promise.all([
+      const [gainersRes, shortsRes] = await Promise.all([
         supabase
-          .from('v_inventory_dashboard')
-          .select('id, name, rarity, image_url, tcgplayer_id')
-          .in('rarity', ['unique', 'elite'])
-          .not('tcgplayer_id', 'is', null)
-          .order('tcgplayer_market', { ascending: false })
+          .from('v_price_gainers_losers')
+          .select('card_id, name, rarity, pct_change')
+          .gt('pct_change', 0)
+          .eq('foil', false)
+          .order('pct_change', { ascending: false })
           .limit(5),
         supabase
           .from('youtube_openings')
@@ -27,7 +27,20 @@ export default function Home() {
           .order('filmed_at', { ascending: false })
           .limit(4),
       ])
-      setHeroCards(heroRes.data ?? [])
+
+      const gainerIds = (gainersRes.data ?? []).map(g => g.card_id)
+      const { data: imageData } = gainerIds.length > 0
+        ? await supabase.from('cards').select('id, image_url, tcgplayer_id').in('id', gainerIds)
+        : { data: [] }
+      const imageMap = Object.fromEntries((imageData ?? []).map(c => [c.id, c]))
+
+      setHeroCards((gainersRes.data ?? []).map(g => ({
+        id: g.card_id,
+        name: g.name,
+        rarity: g.rarity,
+        image_url: imageMap[g.card_id]?.image_url,
+        tcgplayer_id: imageMap[g.card_id]?.tcgplayer_id,
+      })))
       setShorts(shortsRes.data ?? [])
     }
 
@@ -212,14 +225,9 @@ export default function Home() {
 
       </section>
 
-      {/* Section 3 — This Week's Movers */}
-      <section style={{ marginTop: 40 }}>
-        <WeeklyMovers publicLinks />
-      </section>
-
-      {/* Section 4 — Latest Shorts */}
+      {/* Section 3 — Latest Shorts */}
       {shorts.length > 0 && (
-        <section style={{ marginTop: '56px' }}>
+        <section style={{ marginTop: 40 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
             <div style={{ fontFamily: 'var(--font-display)', fontSize: 15, color: 'var(--gold-light)', letterSpacing: '0.04em' }}>Latest Shorts</div>
             <a href="https://www.youtube.com/@SatornTCG/shorts" target="_blank" rel="noreferrer"
@@ -269,6 +277,10 @@ export default function Home() {
         </section>
       )}
 
+      {/* Section 4 — This Week's Movers */}
+      <section style={{ marginTop: 40 }}>
+        <WeeklyMovers publicLinks />
+      </section>
 
       {/* Contact strip */}
       <section style={{
