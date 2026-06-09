@@ -41,30 +41,30 @@ export default function Home() {
       <section style={{ display: 'flex', alignItems: 'flex-start', gap: 24, flexWrap: 'wrap', paddingTop: 4, paddingBottom: 4 }}>
 
         {/* Left: text */}
-        <div style={{ flex: '1 1 280px' }}>
+        <div style={{ flex: '1 1 280px', maxWidth: 460 }}>
           <p style={{
             textTransform: 'uppercase',
             color: 'var(--gold)',
-            fontSize: '11px',
+            fontSize: '12px',
             letterSpacing: '0.12em',
-            marginBottom: '6px',
+            marginBottom: '8px',
           }}>
             Sorcery: Contested Realm
           </p>
           <h1 style={{
             fontFamily: 'var(--font-display)',
-            fontSize: 'clamp(22px, 3vw, 36px)',
+            fontSize: 'clamp(32px, 4.5vw, 52px)',
             color: 'var(--text-primary)',
-            lineHeight: 1.15,
-            marginBottom: '8px',
+            lineHeight: 1.1,
+            marginBottom: '12px',
           }}>
             Track. Price. Sell.
           </h1>
           <p style={{
             color: 'var(--text-secondary)',
-            fontSize: '14px',
-            lineHeight: 1.6,
-            margin: '0 0 12px',
+            fontSize: '15px',
+            lineHeight: 1.65,
+            margin: '0 0 20px',
           }}>
             Live TCGPlayer prices, eBay sales data, and pack opening stats — all in one place. Built for Sorcery: Contested Realm players.
           </p>
