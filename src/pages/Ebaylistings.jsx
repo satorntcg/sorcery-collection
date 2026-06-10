@@ -255,12 +255,25 @@ function SoldModal({ listing, onClose, onSaved }) {
       const { error: err } = await supabase.from('ebay_listings').update(update).eq('id', listing.id)
       if (err) throw err
       // Only decrement inventory quantities when marking sold for the first time
-      if (!isEdit && listing.card_id) {
-        const { data: cardRow } = await supabase.from('cards').select('quantity_owned, quantity_listed').eq('id', listing.card_id).single()
-        if (cardRow) await supabase.from('cards').update({
-          quantity_listed: Math.max(0, (cardRow.quantity_listed ?? 0) - 1),
-          quantity_owned:  Math.max(0, (cardRow.quantity_owned  ?? 0) - 1),
-        }).eq('id', listing.card_id)
+      if (!isEdit) {
+        if (listing.card_id) {
+          const { data: cardRow } = await supabase.from('cards').select('quantity_owned, quantity_listed').eq('id', listing.card_id).single()
+          if (cardRow) await supabase.from('cards').update({
+            quantity_listed: Math.max(0, (cardRow.quantity_listed ?? 0) - 1),
+            quantity_owned:  Math.max(0, (cardRow.quantity_owned  ?? 0) - 1),
+          }).eq('id', listing.card_id)
+        } else {
+          // Lot listing — decrement each card via ebay_listing_cards
+          const { data: lotCards } = await supabase.from('ebay_listing_cards').select('card_id, quantity').eq('listing_id', listing.id)
+          for (const lc of (lotCards ?? [])) {
+            const qty = lc.quantity ?? 1
+            const { data: cardRow } = await supabase.from('cards').select('quantity_owned, quantity_listed').eq('id', lc.card_id).single()
+            if (cardRow) await supabase.from('cards').update({
+              quantity_listed: Math.max(0, (cardRow.quantity_listed ?? 0) - qty),
+              quantity_owned:  Math.max(0, (cardRow.quantity_owned  ?? 0) - qty),
+            }).eq('id', lc.card_id)
+          }
+        }
       }
       onSaved()
     } catch (e) { setError(e.message) } finally { setSaving(false) }
@@ -592,6 +605,14 @@ function DeleteSoldModal({ listing, onClose, onSaved }) {
     if (listing.card_id) {
       const { data: cardRow } = await supabase.from('cards').select('quantity_owned').eq('id', listing.card_id).single()
       if (cardRow) await supabase.from('cards').update({ quantity_owned: (cardRow.quantity_owned ?? 0) + 1 }).eq('id', listing.card_id)
+    } else {
+      // Lot listing — restore each card via ebay_listing_cards
+      const { data: lotCards } = await supabase.from('ebay_listing_cards').select('card_id, quantity').eq('listing_id', listing.id)
+      for (const lc of (lotCards ?? [])) {
+        const qty = lc.quantity ?? 1
+        const { data: cardRow } = await supabase.from('cards').select('quantity_owned').eq('id', lc.card_id).single()
+        if (cardRow) await supabase.from('cards').update({ quantity_owned: (cardRow.quantity_owned ?? 0) + qty }).eq('id', lc.card_id)
+      }
     }
     await supabase.from('ebay_listings').delete().eq('id', listing.id)
     onSaved()
