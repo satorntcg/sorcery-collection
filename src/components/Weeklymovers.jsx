@@ -14,7 +14,7 @@ function weekRange() {
   return `${fmt(start)} – ${fmt(end)}`
 }
 
-export default function WeeklyMovers({ publicLinks = false }) {
+export default function WeeklyMovers({ publicLinks = false, onSelect }) {
   const [movers, setMovers]     = useState([])
   const [loading, setLoading]   = useState(true)
   const [foilFilter, setFoil]   = useState('nonfoil')
@@ -68,7 +68,7 @@ export default function WeeklyMovers({ publicLinks = false }) {
     const icon = moverIcon(g)
     return (
       <div
-        onClick={() => navigate(`/cards/${slugify(g.name)}/${g.card_id}`)}
+        onClick={() => onSelect ? onSelect(g.card_id, g.name, g) : navigate(`/cards/${slugify(g.name)}/${g.card_id}`)}
         style={{
           display: 'grid', gridTemplateColumns: '1fr auto auto',
           alignItems: 'center', gap: 10,

@@ -31,6 +31,8 @@ export default function Market() {
   const [lastChecked, setLastChecked] = useState(null)
   const [search, setSearch]           = useState('')
   const [myListings, setMyListings]   = useState([])
+  const [fallbackCard, setFallbackCard] = useState(null)
+  const [latestSnap, setLatestSnap]     = useState(null)
 
   useEffect(() => {
     async function load() {
@@ -56,7 +58,7 @@ export default function Market() {
       const [{ data: snapData }, { data: myListingsData }, { data: lotData }] = await Promise.all([
         supabase
           .from('price_snapshots')
-          .select('tcgplayer_market, ebay_sold_avg, checked_at')
+          .select('tcgplayer_market, tcgplayer_low, ebay_sold_avg, ebay_sold_low, ebay_sold_high, checked_at')
           .eq('card_id', selected)
           .order('checked_at', { ascending: true })
           .limit(60),
@@ -147,6 +149,8 @@ export default function Market() {
           .sort((a, b) => a.rawDate.localeCompare(b.rawDate))
           .map(({ rawDate, ...rest }) => rest)
       )
+      const snaps = snapData ?? []
+      setLatestSnap(snaps.length ? snaps[snaps.length - 1] : null)
     }
     loadHistory()
   }, [selected])
@@ -182,6 +186,20 @@ export default function Market() {
   }, [cards, searchParams])
 
   const selectedCard = cards.find(c => c.card_id === selected)
+  const displayCard  = selectedCard ?? (fallbackCard && latestSnap ? {
+    name:           fallbackCard.name,
+    foil:           fallbackCard.foil,
+    rarity:         fallbackCard.rarity,
+    set_name:       fallbackCard.set_name,
+    tcgplayer_id:   null,
+    tcgplayer_market: latestSnap.tcgplayer_market,
+    tcgplayer_low:    latestSnap.tcgplayer_low,
+    ebay_sold_avg:    latestSnap.ebay_sold_avg,
+    ebay_sold_low:    latestSnap.ebay_sold_low,
+    ebay_sold_high:   latestSnap.ebay_sold_high,
+    checked_at:       latestSnap.checked_at,
+  } : selectedCard)
+
   const filteredCards = search.trim()
     ? cards.filter(c => c.name?.toLowerCase().includes(search.toLowerCase()))
     : cards
@@ -223,7 +241,7 @@ export default function Market() {
         </div>
       )}
 
-      <WeeklyMovers />
+      <WeeklyMovers onSelect={(id, name, mover) => { setSelected(id); setSearch(name); setFallbackCard(mover) }} />
 
       <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 16 }}>
         {/* Card list */}
@@ -252,7 +270,7 @@ export default function Market() {
           ) : filteredCards.map(c => (
             <div
               key={c.card_id}
-              onClick={() => setSelected(c.card_id)}
+              onClick={() => { setSelected(c.card_id); setFallbackCard(null) }}
               style={{
                 padding: '12px 16px',
                 borderBottom: '1px solid var(--border)',
@@ -285,15 +303,15 @@ export default function Market() {
             <>
               <div className="panel mb-16">
                 <div className="panel-header">
-                  <span className="panel-title">{selectedCard?.name}{selectedCard?.foil ? ' ✦' : ''}</span>
+                  <span className="panel-title">{displayCard?.name}{displayCard?.foil ? ' ✦' : ''}</span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{selectedCard?.set_name} · {selectedCard?.rarity}</span>
-                    {selectedCard?.checked_at && (
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{displayCard?.set_name} · {displayCard?.rarity}</span>
+                    {displayCard?.checked_at && (
                       <span
                         style={{ fontSize: 11, color: 'var(--gold-dim)', background: 'rgba(201,168,76,0.08)', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '2px 8px' }}
-                        title={`Last checked: ${dateFull(selectedCard.checked_at)}`}
+                        title={`Last checked: ${dateFull(displayCard.checked_at)}`}
                       >
-                        Updated {timeAgo(selectedCard.checked_at)}
+                        Updated {timeAgo(displayCard.checked_at)}
                       </span>
                     )}
                   </div>
@@ -302,41 +320,41 @@ export default function Market() {
                   <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)' }}>
                     <div style={{ fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span>TCGPlayer market</span>
-                      {selectedCard?.tcgplayer_id && (
+                      {displayCard?.tcgplayer_id && (
                         <div style={{ display: 'flex', gap: 8 }}>
-                          <a href={`https://www.tcgplayer.com/product/${selectedCard.tcgplayer_id}`} target="_blank" rel="noreferrer" style={{ fontSize: 10, color: 'var(--gold)', textDecoration: 'none', borderBottom: '1px dashed var(--gold)' }}>
+                          <a href={`https://www.tcgplayer.com/product/${displayCard.tcgplayer_id}`} target="_blank" rel="noreferrer" style={{ fontSize: 10, color: 'var(--gold)', textDecoration: 'none', borderBottom: '1px dashed var(--gold)' }}>
                             Listings ↗
                           </a>
-                          <a href={`https://www.tcgplayer.com/search/sorcery-contested-realm/product?productLineName=sorcery-contested-realm&q=${encodeURIComponent(selectedCard?.name)}&view=grid`} target="_blank" rel="noreferrer" style={{ fontSize: 10, color: 'var(--gold)', textDecoration: 'none', borderBottom: '1px dashed var(--gold)' }}>
+                          <a href={`https://www.tcgplayer.com/search/sorcery-contested-realm/product?productLineName=sorcery-contested-realm&q=${encodeURIComponent(displayCard?.name)}&view=grid`} target="_blank" rel="noreferrer" style={{ fontSize: 10, color: 'var(--gold)', textDecoration: 'none', borderBottom: '1px dashed var(--gold)' }}>
                             Price history ↗
                           </a>
                         </div>
                       )}
                     </div>
-                    <div style={{ fontSize: 18, fontWeight: 300, color: 'var(--gold-light)' }}>{usd(selectedCard?.tcgplayer_market)}</div>
+                    <div style={{ fontSize: 18, fontWeight: 300, color: 'var(--gold-light)' }}>{usd(displayCard?.tcgplayer_market)}</div>
                   </div>
                   <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)' }}>
                     <div style={{ fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 4 }}>TCGPlayer low</div>
-                    <div style={{ fontSize: 18, fontWeight: 300, color: 'var(--gold-light)' }}>{usd(selectedCard?.tcgplayer_low)}</div>
+                    <div style={{ fontSize: 18, fontWeight: 300, color: 'var(--gold-light)' }}>{usd(displayCard?.tcgplayer_low)}</div>
                   </div>
                   <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)' }}>
                     <div style={{ fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span>eBay sold avg</span>
                       <a
-                        href={`https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(`${selectedCard?.name}${selectedCard?.foil ? ' foil' : ' non-foil'} Sorcery TCG`)}&_sop=13&LH_Sold=1&LH_Complete=1`}
+                        href={`https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(`${displayCard?.name}${displayCard?.foil ? ' foil' : ' non-foil'} Sorcery TCG`)}&_sop=13&LH_Sold=1&LH_Complete=1`}
                         target="_blank" rel="noreferrer"
                         style={{ fontSize: 10, color: 'var(--text-secondary)', textDecoration: 'none', borderBottom: '1px dashed var(--border-mid)' }}
                       >
                         eBay sold ↗
                       </a>
                     </div>
-                    <div style={{ fontSize: 18, fontWeight: 300, color: 'var(--gold-light)' }}>{usd(selectedCard?.ebay_sold_avg)}</div>
+                    <div style={{ fontSize: 18, fontWeight: 300, color: 'var(--gold-light)' }}>{usd(displayCard?.ebay_sold_avg)}</div>
                   </div>
                   <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)' }}>
                     <div style={{ fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span>eBay sold range</span>
                       <a
-                        href={`https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(`${selectedCard?.name}${selectedCard?.foil ? ' foil' : ' non-foil'} Sorcery TCG`)}&_sop=15&LH_Sold=1&LH_Complete=1`}
+                        href={`https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(`${displayCard?.name}${displayCard?.foil ? ' foil' : ' non-foil'} Sorcery TCG`)}&_sop=15&LH_Sold=1&LH_Complete=1`}
                         target="_blank" rel="noreferrer"
                         style={{ fontSize: 10, color: 'var(--text-secondary)', textDecoration: 'none', borderBottom: '1px dashed var(--border-mid)' }}
                       >
@@ -344,7 +362,7 @@ export default function Market() {
                       </a>
                     </div>
                     <div style={{ fontSize: 18, fontWeight: 300, color: 'var(--gold-light)' }}>
-                      {selectedCard?.ebay_sold_low ? `${usd(selectedCard.ebay_sold_low)} – ${usd(selectedCard.ebay_sold_high)}` : '—'}
+                      {displayCard?.ebay_sold_low ? `${usd(displayCard.ebay_sold_low)} – ${usd(displayCard.ebay_sold_high)}` : '—'}
                     </div>
                   </div>
                 </div>
