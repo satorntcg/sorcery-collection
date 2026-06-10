@@ -19,5 +19,6 @@ pnpm-debug.log*
 # Editor and OS noise
 .DS_Store
 Thumbs.db
-.vscode/
+.vscode/*.code-snippets
+.vscode/launch.json
 .idea/
