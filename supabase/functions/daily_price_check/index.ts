@@ -1,5 +1,5 @@
 // ============================================================
-// Edge Function: daily_price_check v16
+// Edge Function: daily_price_check v17
 // eBay prices ONLY — TCGPlayer handled by Google Apps Script
 // Processes BATCH_SIZE cards per run, skips cards already
 // checked today. Only processes cards that have a TCGplayer
