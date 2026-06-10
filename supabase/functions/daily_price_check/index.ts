@@ -1,8 +1,10 @@
 // ============================================================
-// Edge Function: daily_price_check v13
+// Edge Function: daily_price_check v16
 // eBay prices ONLY — TCGPlayer handled by Google Apps Script
 // Processes BATCH_SIZE cards per run, skips cards already
-// checked today. Run every 30 min via pg_cron.
+// checked today. Only processes cards that have a TCGplayer
+// snapshot today — no wasted batch slots.
+// Run every 20 min via pg_cron.
 // ============================================================
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -12,18 +14,18 @@ const supabase = createClient(
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 );
 
-const EBAY_APP_ID     = Deno.env.get("EBAY_APP_ID")!;
-const EBAY_CERT_ID    = Deno.env.get("EBAY_CERT_ID")!;
-const ALERT_THRESHOLD = parseFloat(Deno.env.get("ALERT_PCT_THRESHOLD") ?? "15");
-const RESEND_API_KEY  = Deno.env.get("RESEND_API_KEY")!;
-const ALERT_EMAIL_TO  = Deno.env.get("ALERT_EMAIL_TO") ?? "satorntcg@gmail.com";
+const EBAY_APP_ID      = Deno.env.get("EBAY_APP_ID")!;
+const EBAY_CERT_ID     = Deno.env.get("EBAY_CERT_ID")!;
+const ALERT_THRESHOLD  = parseFloat(Deno.env.get("ALERT_PCT_THRESHOLD") ?? "15");
+const RESEND_API_KEY   = Deno.env.get("RESEND_API_KEY")!;
+const ALERT_EMAIL_TO   = Deno.env.get("ALERT_EMAIL_TO") ?? "satorntcg@gmail.com";
 const ALERT_EMAIL_FROM = "Sorcery TCG Manager <alerts@satorntcg.com>";
-const BATCH_SIZE      = parseInt(Deno.env.get("BATCH_SIZE") ?? "50");
+const BATCH_SIZE       = parseInt(Deno.env.get("BATCH_SIZE") ?? "100");
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin":  "*",
   "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-  "Access-Control-Allow-Headers": "Authorization, Content-Type",
+  "Access-Control-Allow-Headers": "Authorization, Content-Type, apikey",
   "Content-Type":                 "application/json",
 };
 
@@ -62,59 +64,64 @@ async function getEbayToken(): Promise<string> {
 }
 
 // ─────────────────────────────────────────
-// eBay Browse API — foil-aware search
+// eBay Finding API — completed/sold items only
 // ─────────────────────────────────────────
 async function fetchEbayPrices(
   cardName: string,
   foil: boolean,
-  token: string,
+  _token: string,
 ): Promise<{ avg: number | null; low: number | null; high: number | null; count: number }> {
-  const foilTag    = foil ? " foil" : " non-foil";
-  const searchFn   = async (q: string, limit: number) => {
-    const url = "https://api.ebay.com/buy/browse/v1/item_summary/search" +
-      `?q=${encodeURIComponent(q)}&filter=buyingOptions:{FIXED_PRICE}&sort=price&limit=${limit}`;
+  const foilTag = foil ? " foil" : " non-foil";
+
+  const searchFn = async (keywords: string): Promise<number[]> => {
+    const params = new URLSearchParams({
+      "OPERATION-NAME":          "findCompletedItems",
+      "SERVICE-VERSION":         "1.0.0",
+      "SECURITY-APPNAME":        EBAY_APP_ID,
+      "RESPONSE-DATA-FORMAT":    "JSON",
+      "REST-PAYLOAD":            "",
+      "keywords":                keywords,
+      "itemFilter(0).name":      "SoldItemsOnly",
+      "itemFilter(0).value":     "true",
+      "itemFilter(1).name":      "ListingType",
+      "itemFilter(1).value":     "FixedPrice",
+      "sortOrder":               "EndTimeSoonest",
+      "paginationInput.entriesPerPage": "50",
+    });
+    const url = `https://svcs.ebay.com/services/search/FindingService/v1?${params}`;
     const res = await fetch(url, {
-      headers: {
-        "Authorization":           `Bearer ${token}`,
-        "Content-Type":            "application/json",
-        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
-      },
+      headers: { "X-EBAY-SOA-SECURITY-APPNAME": EBAY_APP_ID },
     });
     if (!res.ok) return [];
-    return (await res.json())?.itemSummaries ?? [];
-  };
+    const json = await res.json();
+    const items: Record<string, unknown>[] =
+      json?.findCompletedItemsResponse?.[0]?.searchResult?.[0]?.item ?? [];
 
-  // Post-filter: keep only items whose title matches foil intent.
-  // For non-foil cards, drop any listing with "foil" in the title.
-  // For foil cards, drop any listing that lacks "foil" in the title — but only
-  // if doing so still leaves at least 3 results (avoids over-filtering rare cards).
-  const titleFilter = (rawItems: Record<string, unknown>[]) => {
-    const filtered = rawItems.filter((item) => {
-      const title = ((item.title as string) ?? '').toLowerCase();
-      return foil ? title.includes('foil') : !title.includes('foil');
-    });
-    return (foil && filtered.length < 3) ? rawItems : filtered;
+    const titleFilter = (list: Record<string, unknown>[]) => {
+      const filtered = list.filter(item => {
+        const title = ((item.title as string[])?.[0] ?? '').toLowerCase();
+        return foil ? title.includes('foil') : !title.includes('foil');
+      });
+      return (foil && filtered.length < 3) ? list : filtered;
+    };
+
+    return titleFilter(items)
+      .map(item => parseFloat(
+        ((item.sellingStatus as Record<string, unknown>[])?.[0]
+          ?.currentPrice as Record<string, unknown>[])?.[0]
+          ?.__value__ as string ?? "0"
+      ))
+      .filter(p => p > 0 && p < 50000);
   };
 
   try {
-    // 1. Foil-qualified search
-    let items = titleFilter(await searchFn(`"${cardName}"${foilTag} Sorcery TCG`, 50));
-    // 2. Broader foil-qualified fallback
-    if (!items.length) items = titleFilter(await searchFn(`${cardName}${foilTag} Sorcery card`, 20));
-    // 3. Last-resort fallback — keep foil qualifier via negative keyword for non-foil cards
-    if (!items.length) {
-      const fallbackQ = foil
-        ? `"${cardName}" Sorcery TCG`
-        : `"${cardName}" Sorcery TCG -foil`;
-      items = titleFilter(await searchFn(fallbackQ, 30));
+    let prices = await searchFn(`"${cardName}"${foilTag} Sorcery TCG`);
+    if (!prices.length) prices = await searchFn(`${cardName}${foilTag} Sorcery card`);
+    if (!prices.length) {
+      prices = await searchFn(
+        foil ? `"${cardName}" Sorcery TCG` : `"${cardName}" Sorcery TCG -foil`
+      );
     }
-    if (!items.length) return { avg: null, low: null, high: null, count: 0 };
-
-    let prices: number[] = items
-      .map((item: Record<string, unknown>) =>
-        parseFloat(((item.price as Record<string, unknown>)?.value as string) ?? "0"))
-      .filter((p: number) => p > 0 && p < 50000);
-
     if (!prices.length) return { avg: null, low: null, high: null, count: 0 };
 
     prices.sort((a, b) => a - b);
@@ -154,22 +161,30 @@ async function checkAndCreateAlerts(
   const message   = `TCGPlayer ${pct > 0 ? "up" : "down"} ${Math.abs(Math.round(pct))}% ($${prevTcgPrice} → $${newTcgPrice})`;
 
   const { error } = await supabase.from("price_alerts").insert({
-    card_id: cardId, alert_type: alertType,
-    old_price: prevTcgPrice, new_price: newTcgPrice,
-    pct_change: Math.round(pct * 100) / 100, message,
+    card_id:    cardId,
+    alert_type: alertType,
+    old_price:  prevTcgPrice,
+    new_price:  newTcgPrice,
+    pct_change: Math.round(pct * 100) / 100,
+    message,
   });
   if (error) { console.error("Alert insert failed:", error); return; }
 
-  pendingEmailAlerts.push({ cardName, alertType, oldPrice: prevTcgPrice, newPrice: newTcgPrice, pctChange: Math.round(pct * 100) / 100, message });
+  pendingEmailAlerts.push({
+    cardName, alertType,
+    oldPrice: prevTcgPrice, newPrice: newTcgPrice,
+    pctChange: Math.round(pct * 100) / 100, message,
+  });
 }
 
 // ─────────────────────────────────────────
-// Status email (always sent after batch)
+// Status email
 // ─────────────────────────────────────────
 async function sendStatusEmail(
-  results: { updated: number; created: number; failed: number; alerts: number },
-  alerts: AlertRecord[],
-  batchInfo: { batchSize: number; remaining: number; total: number },
+  results:   { updated: number; created: number; failed: number; skipped: number; alerts: number },
+  alerts:    AlertRecord[],
+  batchInfo: { batchSize: number; remaining: number; total: number; withSnapshot: number },
+  lastCard:  string,
 ): Promise<void> {
   if (!RESEND_API_KEY) return;
 
@@ -196,15 +211,31 @@ async function sendStatusEmail(
 
   <div style="background:#161411;border:1px solid rgba(201,168,76,0.1);border-radius:12px;padding:20px;margin-bottom:24px;">
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;text-align:center;">
-      <div><div style="font-size:22px;font-weight:300;color:#4CAF6E;">${results.updated}</div><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.1em;color:#5A5448;margin-top:4px;">Updated</div></div>
-      <div><div style="font-size:22px;font-weight:300;color:#9A9080;">${results.created}</div><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.1em;color:#5A5448;margin-top:4px;">New snaps</div></div>
-      <div><div style="font-size:22px;font-weight:300;color:${results.failed > 0 ? '#C94C4C' : '#9A9080'};">${results.failed}</div><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.1em;color:#5A5448;margin-top:4px;">Failed</div></div>
-      <div><div style="font-size:22px;font-weight:300;color:${alerts.length > 0 ? '#C9A84C' : '#9A9080'};">${alerts.length}</div><div style="font-size:10px;text-transform:uppercase;letter-spacing:0.1em;color:#5A5448;margin-top:4px;">Alerts</div></div>
+      <div>
+        <div style="font-size:22px;font-weight:300;color:#4CAF6E;">${results.updated}</div>
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.1em;color:#5A5448;margin-top:4px;">Updated</div>
+      </div>
+      <div>
+        <div style="font-size:22px;font-weight:300;color:#9A9080;">${results.created}</div>
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.1em;color:#5A5448;margin-top:4px;">New snaps</div>
+      </div>
+      <div>
+        <div style="font-size:22px;font-weight:300;color:${results.failed > 0 ? '#C94C4C' : '#9A9080'};">${results.failed}</div>
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.1em;color:#5A5448;margin-top:4px;">Failed</div>
+      </div>
+      <div>
+        <div style="font-size:22px;font-weight:300;color:${alerts.length > 0 ? '#C9A84C' : '#9A9080'};">${alerts.length}</div>
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.1em;color:#5A5448;margin-top:4px;">Alerts</div>
+      </div>
     </div>
     <div style="margin-top:16px;padding-top:16px;border-top:1px solid #2A2520;font-size:12px;color:#5A5448;text-align:center;">
-      Batch: ${batchInfo.batchSize} cards · ${batchInfo.remaining} remaining of ${batchInfo.total} total
+      Batch: ${batchInfo.batchSize} cards · ${batchInfo.remaining} remaining · ${batchInfo.withSnapshot} of ${batchInfo.total} cards have TCG snapshot today
       ${allDone ? ' · <span style="color:#4CAF6E;">All cards checked ✓</span>' : ''}
     </div>
+    ${lastCard ? `
+    <div style="margin-top:10px;padding-top:10px;border-top:1px solid #2A2520;font-size:12px;color:#5A5448;text-align:center;">
+      Last card processed: <strong style="color:#F0EAD6;">${lastCard}</strong>
+    </div>` : ''}
   </div>
 
   ${alerts.length > 0 ? `
@@ -220,10 +251,12 @@ async function sendStatusEmail(
       ${alertRows}
     </table>
   </div>` : `
-  <div style="background:#161411;border:1px solid rgba(201,168,76,0.1);border-radius:10px;padding:16px;margin-bottom:24px;text-align:center;color:#5A5448;font-size:13px;">No price alerts this batch</div>`}
+  <div style="background:#161411;border:1px solid rgba(201,168,76,0.1);border-radius:10px;padding:16px;margin-bottom:24px;text-align:center;color:#5A5448;font-size:13px;">
+    No price alerts this batch
+  </div>`}
 
   <div style="border-top:1px solid rgba(201,168,76,0.15);padding-top:16px;">
-    <p style="font-size:12px;color:#5A5448;margin:0;">eBay prices only · TCGPlayer via Google Apps Script · Alert threshold: ≥${ALERT_THRESHOLD}% · Foil-aware search v13</p>
+    <p style="font-size:12px;color:#5A5448;margin:0;">eBay sold prices (completed listings) · TCGPlayer via Google Apps Script · Alert threshold: ≥${ALERT_THRESHOLD}% · Foil-aware search v17</p>
   </div>
 </div></body></html>`;
 
@@ -247,28 +280,87 @@ async function sendStatusEmail(
 }
 
 // ─────────────────────────────────────────
+// Failure alert email
+// ─────────────────────────────────────────
+async function sendFailureEmail(err: unknown): Promise<void> {
+  if (!RESEND_API_KEY) return;
+  const now     = new Date();
+  const dateStr = now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' });
+
+  await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: { "Authorization": `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      from:    ALERT_EMAIL_FROM,
+      to:      [ALERT_EMAIL_TO],
+      subject: `🚨 eBay Price Check FAILED — ${dateStr}`,
+      html: `<!DOCTYPE html><html><body style="background:#0A0908;color:#F0EAD6;font-family:-apple-system,sans-serif;margin:0;padding:0;">
+<div style="max-width:600px;margin:0 auto;padding:32px 24px;">
+  <div style="border-bottom:1px solid rgba(201,76,76,0.4);padding-bottom:20px;margin-bottom:24px;">
+    <div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:#C94C4C;margin-bottom:6px;">Sorcery TCG Market Manager</div>
+    <h1 style="margin:0;font-size:22px;font-weight:600;">⚠️ Edge Function Failed</h1>
+    <p style="margin:6px 0 0;font-size:13px;color:#9A9080;">${dateStr} · ${timeStr}</p>
+  </div>
+  <div style="background:#1E1010;border:1px solid rgba(201,76,76,0.2);border-radius:12px;padding:20px;margin-bottom:24px;">
+    <div style="font-size:12px;color:#C94C4C;font-weight:600;margin-bottom:8px;">ERROR</div>
+    <pre style="font-size:12px;color:#F0EAD6;margin:0;white-space:pre-wrap;word-break:break-all;">${String(err)}</pre>
+  </div>
+  <div style="border-top:1px solid rgba(201,168,76,0.15);padding-top:16px;">
+    <p style="font-size:12px;color:#5A5448;margin:0;">
+      <a href="https://supabase.com/dashboard/project/fctyxspeishvjhlyfpbs/functions/daily_price_check/logs"
+         style="color:#C9A84C;">View Edge Function logs →</a>
+    </p>
+  </div>
+</div></body></html>`,
+    }),
+  }).catch(e => console.error("Failed to send failure email:", e));
+}
+
+// ─────────────────────────────────────────
 // Main handler
 // ─────────────────────────────────────────
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: CORS_HEADERS });
-  if (req.method !== "POST" && req.method !== "GET") return new Response("Method not allowed", { status: 405 });
 
-  console.log(`Starting eBay price check v13 — batch size: ${BATCH_SIZE} — ${new Date().toISOString()}`);
+  // ── Auth: validate apikey header against Supabase secret keys ──
+  const apiKey     = req.headers.get('apikey') ?? '';
+  const secretKeys: Record<string, string> = JSON.parse(Deno.env.get('SUPABASE_SECRET_KEYS') ?? '{}');
+  const isValid    = Object.values(secretKeys).some(k => k === apiKey);
+
+  if (!isValid) {
+    console.error(`Unauthorized — invalid apikey`);
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
+      headers: CORS_HEADERS,
+    });
+  }
+
+  if (req.method !== "POST" && req.method !== "GET") {
+    return new Response("Method not allowed", { status: 405 });
+  }
+
+  console.log(`Starting eBay price check v17 — batch size: ${BATCH_SIZE} — ${new Date().toISOString()}`);
 
   try {
     const todayStart = new Date();
     todayStart.setUTCHours(0, 0, 0, 0);
 
-    // ── 1. Find cards that don't yet have eBay data today ──
-    console.log("Step 1: Finding cards needing eBay check today...");
-    const { data: checkedIds } = await supabase
+    // ── 1. Load today's snapshots — track which have TCG snapshot and which have eBay ──
+    console.log("Step 1: Loading today's snapshot state...");
+    const { data: todaySnaps } = await supabase
       .from("price_snapshots")
-      .select("card_id")
-      .gte("checked_at", todayStart.toISOString())
-      .not("ebay_sold_avg", "is", null);
+      .select("card_id, ebay_sold_avg")
+      .gte("checked_at", todayStart.toISOString());
 
-    const alreadyHasEbay = new Set((checkedIds ?? []).map(s => s.card_id));
+    const hasSnapshotToday = new Set((todaySnaps ?? []).map(s => s.card_id));
+    const alreadyHasEbay   = new Set(
+      (todaySnaps ?? [])
+        .filter(s => s.ebay_sold_avg !== null)
+        .map(s => s.card_id)
+    );
 
+    // ── 2. Load all cards ──
     const { data: allCards, error: cardsError } = await supabase
       .from("cards")
       .select("id, name, set_name, foil, tcgplayer_id")
@@ -276,22 +368,28 @@ Deno.serve(async (req) => {
 
     if (cardsError) throw cardsError;
 
-    const needsCheck = (allCards ?? []).filter(c => !alreadyHasEbay.has(c.id));
-    const batch      = needsCheck.slice(0, BATCH_SIZE);
-    const remaining  = needsCheck.length;
-    const total      = allCards?.length ?? 0;
+    const total        = allCards?.length ?? 0;
+    const withSnapshot = hasSnapshotToday.size;
 
-    console.log(`Cards total: ${total} | need eBay check: ${remaining} | this batch: ${batch.length}`);
+    // Only process cards that have a TCGplayer snapshot today but no eBay data yet
+    const needsCheck = (allCards ?? []).filter(c =>
+      hasSnapshotToday.has(c.id) && !alreadyHasEbay.has(c.id)
+    );
+
+    const batch     = needsCheck.slice(0, BATCH_SIZE);
+    const remaining = needsCheck.length;
+
+    console.log(`Cards total: ${total} | with TCG snapshot: ${withSnapshot} | need eBay: ${remaining} | this batch: ${batch.length}`);
 
     if (!batch.length) {
-      console.log("All cards have eBay prices today — nothing to do");
+      console.log("All cards with snapshots have eBay prices today — nothing to do");
       return new Response(
-        JSON.stringify({ message: "All cards checked today.", total, remaining: 0 }),
+        JSON.stringify({ message: "All cards checked today.", total, withSnapshot, remaining: 0 }),
         { status: 200, headers: CORS_HEADERS }
       );
     }
 
-    // ── 2. Load YESTERDAY's prices for alert comparison ──
+    // ── 3. Load YESTERDAY's prices for alert comparison ──
     console.log("Step 2: Loading yesterday's prices for alert comparison...");
     const yesterday = new Date(todayStart);
     yesterday.setUTCDate(yesterday.getUTCDate() - 1);
@@ -305,27 +403,27 @@ Deno.serve(async (req) => {
       .not("tcgplayer_market", "is", null)
       .order("checked_at", { ascending: false });
 
-    // Dedupe to one per card (most recent yesterday snapshot)
     const prevMap = new Map<string, number>();
     for (const s of (prevSnaps ?? [])) {
       if (!prevMap.has(s.card_id)) prevMap.set(s.card_id, s.tcgplayer_market as number);
     }
 
-    // ── 3. Get eBay token ──
+    // ── 4. Get eBay token (OAuth — still needed for other potential Browse API calls) ──
     console.log("Step 3: Getting eBay token...");
     const ebayToken = await getEbayToken();
     console.log("eBay token OK");
 
-    // ── 4. Process batch ──
-    const results = { updated: 0, created: 0, failed: 0, alerts: 0 };
+    // ── 5. Process batch ──
+    const results  = { updated: 0, created: 0, failed: 0, skipped: 0, alerts: 0 };
     const pendingEmailAlerts: AlertRecord[] = [];
+    let lastCard   = '';
 
     for (const card of batch as Card[]) {
-      console.log(`Processing: ${card.name}${card.foil ? ' (Foil)' : ''}`);
+      lastCard = `${card.name}${card.foil ? ' (Foil)' : ''}`;
+      console.log(`Processing: ${lastCard}`);
       try {
         await new Promise(r => setTimeout(r, 300));
 
-        // Pass foil flag so search is foil-aware
         const ebay = await fetchEbayPrices(card.name, card.foil ?? false, ebayToken);
         console.log(`  eBay: avg=$${ebay.avg} count=${ebay.count}`);
 
@@ -347,9 +445,12 @@ Deno.serve(async (req) => {
             })
             .eq("id", existingSnap.id);
 
-          if (error) { console.error(`  Snapshot update failed: ${error.message}`); results.failed++; continue; }
+          if (error) {
+            console.error(`  Snapshot update failed: ${error.message}`);
+            results.failed++;
+            continue;
+          }
 
-          // Compare yesterday's price to today's for alerts
           await checkAndCreateAlerts(
             card.id, card.name,
             prevMap.get(card.id) ?? null,
@@ -361,7 +462,8 @@ Deno.serve(async (req) => {
           results.updated++;
           console.log(`  ✓ updated snapshot`);
         } else {
-          console.log(`  → no snapshot today for ${card.name} — skipping (Apps Script will create)`);
+          console.log(`  → no snapshot found for ${card.name} — skipping`);
+          results.skipped++;
         }
       } catch (err) {
         console.error(`  FAILED: ${card.name} — ${String(err)}`);
@@ -369,22 +471,30 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ── 5. Send status email ──
+    // ── 6. Send status email ──
     results.alerts = pendingEmailAlerts.length;
-    await sendStatusEmail(results, pendingEmailAlerts, {
-      batchSize: batch.length,
-      remaining: remaining - batch.length,
-      total,
-    });
+    await sendStatusEmail(
+      results,
+      pendingEmailAlerts,
+      {
+        batchSize:    batch.length,
+        remaining:    remaining - batch.length,
+        total,
+        withSnapshot,
+      },
+      lastCard,
+    );
 
     console.log(`Batch complete:`, results);
 
     return new Response(
       JSON.stringify({
-        message:    "eBay batch complete",
-        checked_at: new Date().toISOString(),
-        batch_size: batch.length,
-        remaining:  remaining - batch.length,
+        message:       "eBay batch complete",
+        checked_at:    new Date().toISOString(),
+        batch_size:    batch.length,
+        remaining:     remaining - batch.length,
+        with_snapshot: withSnapshot,
+        last_card:     lastCard,
         total,
         ...results,
       }),
@@ -393,6 +503,7 @@ Deno.serve(async (req) => {
 
   } catch (err) {
     console.error("Fatal error:", err);
+    await sendFailureEmail(err);
     return new Response(
       JSON.stringify({ error: String(err) }),
       { status: 500, headers: CORS_HEADERS }
