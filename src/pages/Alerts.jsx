@@ -3,33 +3,20 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
 const usd    = (n) => n == null ? '—' : `$${Number(n).toFixed(2)}`
-const fmtChg = (n) => { if (n == null) return '—'; const v = Number(n); return `${v >= 0 ? '+' : '−'}$${Math.abs(v).toFixed(2)}` }
-const weekRange = () => {
-  const end = new Date(); const start = new Date(end); start.setDate(end.getDate() - 7)
-  const fmt = d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-  return `${fmt(start)} – ${fmt(end)}`
-}
-const fmtPnl = (n) => { if (n == null) return '—'; const v = Number(n); return `${v >= 0 ? '+$' : '-$'}${Math.abs(v).toFixed(2)}` }
+const fmtChg = (n) => { if (n == null) return '—'; const v = Number(n); return `${v >= 0 ? '+$' : '-$'}${Math.abs(v).toFixed(2)}` }
 const fmtPct = (n) => { if (n == null) return '—'; const v = Number(n); return `${v >= 0 ? '+' : ''}${v.toFixed(1)}%` }
 const fmtDate  = (d) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'
-const daysAgo  = (d) => {
-  if (!d) return ''
-  const days = Math.round((Date.now() - new Date(d).getTime()) / 86400000)
-  return days === 1 ? '1d ago' : `${days}d ago`
-}
 
 const TABS = [
-  { id: 'price_alerts', label: 'Price alerts'    },
-  { id: 'gainers',      label: 'Top movers'      },
   { id: 'listings',     label: 'Listing alerts'  },
   { id: 'stale',        label: 'Stale listings'  },
+  { id: 'price_alerts', label: 'Price alerts'    },
 ]
 
 export default function Alerts({ onDismiss }) {
   const navigate = useNavigate()
-  const [tab, setTab]                   = useState('price_alerts')
+  const [tab, setTab]                   = useState('listings')
   const [alerts, setAlerts]             = useState([])
-  const [gainers, setGainers]           = useState([])
   const [listingAlerts, setListingAlerts] = useState([])
   const [staleListings, setStaleListings] = useState([])
   const [loading, setLoading]           = useState(true)
@@ -37,9 +24,8 @@ export default function Alerts({ onDismiss }) {
 
   async function loadAll() {
     setLoading(true)
-    const [alertRes, gainerRes, listingRes, staleRes, ebayRes] = await Promise.all([
+    const [alertRes, listingRes, staleRes, ebayRes] = await Promise.all([
       supabase.from('v_active_alerts').select('*'),
-      supabase.from('v_price_gainers_losers').select('*'),
       supabase.from('v_listing_price_alerts').select('*'),
       supabase.from('v_stale_listings').select('*'),
       supabase.from('ebay_listings').select('id, card_id, ebay_url').eq('status', 'active').not('card_id', 'is', null),
@@ -56,12 +42,10 @@ export default function Alerts({ onDismiss }) {
       .filter(a => (a.new_price ?? 0) >= 1)
 
     setAlerts(alertsWithLinks)
-    setGainers(gainerRes.data ?? [])
     setListingAlerts(listingRes.data ?? [])
     setStaleListings(staleRes.data ?? [])
     setCounts({
       price_alerts: alertsWithLinks.length,
-      gainers:      (gainerRes.data ?? []).length,
       listings:     (listingRes.data ?? []).length,
       stale:        (staleRes.data ?? []).length,
     })
@@ -151,70 +135,6 @@ export default function Alerts({ onDismiss }) {
               </div>
             ))}
           </div>
-        )
-      )}
-
-      {/* ── Weekly movers tab ── */}
-      {tab === 'gainers' && (
-        gainers.length === 0 ? (
-          <div className="empty-state"><div className="empty-state-icon">📊</div>No significant movers yet — cards need 7 days of price history and a 10%+ change to appear here.</div>
-        ) : (
-          <>
-            <div style={{ marginBottom: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Week of</span>
-              <span style={{ fontSize: 13, color: 'var(--gold-light)', fontWeight: 500 }}>{weekRange()}</span>
-            </div>
-            <div className="panel" style={{ overflow: 'hidden' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr' }}>
-                {[
-                  { label: '▲ Top Gainers', items: gainers.filter(g => g.pct_change > 0).slice(0, 10), positive: true },
-                  { label: '▼ Top Losers',  items: gainers.filter(g => g.pct_change < 0).slice(0, 10), positive: false },
-                ].map(({ label, items, positive }, si) => (
-                  <div key={label} style={{ borderRight: si === 0 ? '1px solid var(--border)' : 'none' }}>
-                    <div style={{
-                      padding: '8px 16px', fontSize: 11, fontWeight: 600, letterSpacing: '0.08em',
-                      textTransform: 'uppercase', color: positive ? 'var(--success)' : 'var(--danger)',
-                      borderBottom: '1px solid var(--border)',
-                      background: positive ? 'rgba(76,175,110,0.04)' : 'rgba(211,77,77,0.04)',
-                    }}>{label}</div>
-                    {items.map(g => {
-                      const change = Number(g.current_price) - Number(g.price_7d_ago)
-                      return (
-                        <div
-                          key={g.card_id}
-                          onClick={() => navigate(`/market?card=${g.card_id}`)}
-                          style={{
-                            display: 'grid', gridTemplateColumns: '1fr auto',
-                            alignItems: 'center', gap: 12, padding: '10px 16px',
-                            borderBottom: '1px solid var(--border)', cursor: 'pointer',
-                          }}
-                          onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-hover)'}
-                          onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                        >
-                          <div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                              <span className="name-cell" style={{ fontSize: 13 }}>{g.name}{g.foil ? ' ✦' : ''}</span>
-                              <span className={`badge badge-${g.rarity}`} style={{ fontSize: 10 }}>{g.rarity}</span>
-                            </div>
-                            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-                              {usd(g.price_7d_ago)} → {usd(g.current_price)}
-                              <span style={{ marginLeft: 6, color: positive ? 'var(--success)' : 'var(--danger)' }}>
-                                ({fmtChg(change)})
-                              </span>
-                              {g.compared_from && <span style={{ marginLeft: 6 }}>vs {daysAgo(g.compared_from)}</span>}
-                            </div>
-                          </div>
-                          <div style={{ fontSize: 16, fontWeight: 600, color: positive ? 'var(--success)' : 'var(--danger)' }}>
-                            {fmtPct(g.pct_change)}
-                          </div>
-                        </div>
-                      )
-                    })}
-                  </div>
-                ))}
-              </div>
-            </div>
-          </>
         )
       )}
 
