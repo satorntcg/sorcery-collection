@@ -17,8 +17,6 @@ export default function PublicCards() {
 
   const [ebayMap,    setEbayMap]    = useState(new Map())
   const [changeMap,  setChangeMap]  = useState(new Map())
-  const [changeRaw,  setChangeRaw]  = useState([])
-  const [moversOpen, setMoversOpen] = useState(true)
   const [sortKey, setSortKey] = useState('tcgplayer_market')
   const [sortDir, setSortDir] = useState('desc')
   const [page, setPage]       = useState(0)
@@ -64,7 +62,6 @@ export default function PublicCards() {
         supabase.from('v_price_gainers_losers').select('card_id, name, rarity, foil, current_price, price_7d_ago, pct_change'),
       ])
       setCards(allCardData)
-      setChangeRaw(changeData ?? [])
 
       const cm = new Map()
       for (const r of (changeData ?? [])) {
@@ -116,12 +113,6 @@ export default function PublicCards() {
     })
   }, [cards, search, rarityFilter, setFilter, ebayOnly, foilFilter, ebayMap, sortKey, sortDir])
 
-  const topMovers = useMemo(() => {
-    const dollarImpact = r => Math.abs(Number(r.current_price) * Number(r.pct_change))
-    const gainers = [...changeRaw].filter(r => r.pct_change > 0).sort((a, b) => dollarImpact(b) - dollarImpact(a)).slice(0, 3)
-    const losers  = [...changeRaw].filter(r => r.pct_change < 0).sort((a, b) => dollarImpact(b) - dollarImpact(a)).slice(0, 3)
-    return { gainers, losers }
-  }, [changeRaw])
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE)
   const safePage   = Math.min(page, Math.max(0, totalPages - 1))
@@ -209,62 +200,6 @@ export default function PublicCards() {
         </p>
       </div>
 
-      {/* Movers banner */}
-      {!loading && (topMovers.gainers.length > 0 || topMovers.losers.length > 0) && (
-        <div className="panel" style={{ marginTop: 20, overflow: 'hidden' }}>
-          <div
-            onClick={() => setMoversOpen(o => !o)}
-            style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 16px', cursor: 'pointer', borderBottom: moversOpen ? '1px solid var(--border)' : 'none' }}
-          >
-            <span style={{ fontFamily: 'var(--font-display)', fontSize: 13, color: 'var(--gold-light)', letterSpacing: '0.04em' }}>This Week's Movers</span>
-            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{moversOpen ? '▲ collapse' : '▼ expand'}</span>
-          </div>
-          {moversOpen && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0, padding: '12px 16px' }}>
-              <div style={{ paddingRight: 16, borderRight: '1px solid var(--border)' }}>
-                <div style={{ fontSize: 10, color: 'var(--success)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>▲ Gainers</div>
-                {topMovers.gainers.map(c => (
-                  <Link key={c.card_id} to={`/cards/${slugify(c.name)}/${c.card_id}`} style={{ textDecoration: 'none', display: 'block' }}>
-                    <div
-                      style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 4px', borderBottom: '1px solid var(--border)', cursor: 'pointer', borderRadius: 3 }}
-                      onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-raised)'}
-                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                    >
-                      <span style={{ fontSize: 12, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {c.name}{c.foil ? ' ✦' : ''}
-                      </span>
-                      <div style={{ flexShrink: 0, marginLeft: 8, textAlign: 'right' }}>
-                        <span style={{ fontSize: 12, color: 'var(--gold)' }}>{usd(c.current_price)}</span>
-                        <span style={{ fontSize: 10, color: 'var(--success)', marginLeft: 5 }}>+{Number(c.pct_change).toFixed(1)}%</span>
-                      </div>
-                    </div>
-                  </Link>
-                ))}
-              </div>
-              <div style={{ paddingLeft: 16 }}>
-                <div style={{ fontSize: 10, color: 'var(--danger)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>▼ Losers</div>
-                {topMovers.losers.map(c => (
-                  <Link key={c.card_id} to={`/cards/${slugify(c.name)}/${c.card_id}`} style={{ textDecoration: 'none', display: 'block' }}>
-                    <div
-                      style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 4px', borderBottom: '1px solid var(--border)', cursor: 'pointer', borderRadius: 3 }}
-                      onMouseEnter={e => e.currentTarget.style.background = 'var(--bg-raised)'}
-                      onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                    >
-                      <span style={{ fontSize: 12, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {c.name}{c.foil ? ' ✦' : ''}
-                      </span>
-                      <div style={{ flexShrink: 0, marginLeft: 8, textAlign: 'right' }}>
-                        <span style={{ fontSize: 12, color: 'var(--gold)' }}>{usd(c.current_price)}</span>
-                        <span style={{ fontSize: 10, color: 'var(--danger)', marginLeft: 5 }}>{Number(c.pct_change).toFixed(1)}%</span>
-                      </div>
-                    </div>
-                  </Link>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
 
       {/* Filter row */}
       <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', marginTop: '20px' }}>
