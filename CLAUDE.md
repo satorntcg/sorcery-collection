@@ -79,7 +79,7 @@ When adding a feature that needs joined data, prefer creating/extending a view o
 
 ### Pricing pipeline
 
-The pricing pipeline runs in Supabase, not the browser. The Market page can manually invoke the Edge Function at `${VITE_SUPABASE_URL}/functions/v1/daily_price_check` (POST, bearer = anon key) to force a price refresh. The schedule is configured via the `check_schedule` row in the Settings page. The Edge Function source is not in this repo.
+The pricing pipeline runs in Supabase, not the browser. The Market page can manually invoke the Edge Function at `${VITE_SUPABASE_URL}/functions/v1/daily_price_check` (POST, bearer = anon key) to force a price refresh. The schedule is configured via the `check_schedule` row in the Settings page. The Edge Function source lives at `supabase/functions/daily_price_check/index.ts`.
 
 ### Listing Suggestions + AI (Listingsuggestions.jsx)
 
