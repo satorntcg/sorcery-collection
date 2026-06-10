@@ -77,6 +77,9 @@ export default function Sidebar({ alertCount = 0, onSignOut }) {
           <span className="status-dot" />
           Connected to Supabase
         </div>
+        <div style={{ fontSize: 10, color: 'var(--text-muted)', textAlign: 'center', marginBottom: 8, letterSpacing: '0.05em' }}>
+          build {__GIT_HASH__}
+        </div>
         <a
           href="/"
           target="_blank"
