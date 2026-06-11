@@ -162,9 +162,12 @@ export default function PublicCards() {
     const cardLines = selectedCards.map(c => {
       const foilSuffix = c.foil && !c.name.toLowerCase().includes('foil') ? ' (Foil)' : ''
       const qty = wantList.get(c.id) ?? 1
-      return `• ${qty > 1 ? `${qty}× ` : ''}${c.name}${foilSuffix} · ${c.rarity} · ${c.set_name} · TCG ${usd(c.tcgplayer_market)}`
+      const listing = ebayMap.get(c.id)
+      const ebayPart = listing?.ebay_url ? ` · eBay ${usd(listing.listed_price)}: ${listing.ebay_url}` : ''
+      return `• ${qty > 1 ? `${qty}× ` : ''}${c.name}${foilSuffix} · ${c.rarity} · ${c.set_name} · TCG ${usd(c.tcgplayer_market)}${ebayPart}`
     }).join('\n')
-    const message = `I'm interested in the following cards:\n\n${cardLines}${wantForm.notes ? `\n\nAdditional notes:\n${wantForm.notes}` : ''}`
+    const total = selectedCards.reduce((sum, c) => sum + ((c.tcgplayer_market ?? 0) * (wantList.get(c.id) ?? 1)), 0)
+    const message = `I'm interested in the following cards:\n\n${cardLines}\n\nTotal TCG value: ${usd(total)}${wantForm.notes ? `\n\nAdditional notes:\n${wantForm.notes}` : ''}`
 
     try {
       const res = await fetch(`https://formspree.io/f/${FORMSPREE_ID}`, {

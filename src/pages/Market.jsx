@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react'
 import { useSearchParams, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts'
-import WeeklyMovers from '../components/Weeklymovers'
 
 const usd       = (n) => n != null ? `$${Number(n).toFixed(2)}` : '—'
 const dateShort = (d) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''
@@ -31,8 +30,6 @@ export default function Market() {
   const [lastChecked, setLastChecked] = useState(null)
   const [search, setSearch]           = useState('')
   const [myListings, setMyListings]   = useState([])
-  const [fallbackCard, setFallbackCard] = useState(null)
-  const [latestSnap, setLatestSnap]     = useState(null)
 
   useEffect(() => {
     async function load() {
@@ -177,8 +174,6 @@ export default function Market() {
           .sort((a, b) => a.rawDate.localeCompare(b.rawDate))
           .map(({ rawDate, ...rest }) => rest)
       )
-      const snaps = snapData ?? []
-      setLatestSnap(snaps.length ? snaps[snaps.length - 1] : null)
     }
     loadHistory()
   }, [selected])
@@ -214,19 +209,7 @@ export default function Market() {
   }, [cards, searchParams])
 
   const selectedCard = cards.find(c => c.card_id === selected)
-  const displayCard  = selectedCard ?? (fallbackCard && latestSnap ? {
-    name:           fallbackCard.name,
-    foil:           fallbackCard.foil,
-    rarity:         fallbackCard.rarity,
-    set_name:       fallbackCard.set_name,
-    tcgplayer_id:   null,
-    tcgplayer_market: latestSnap.tcgplayer_market,
-    tcgplayer_low:    latestSnap.tcgplayer_low,
-    ebay_sold_avg:    latestSnap.ebay_sold_avg,
-    ebay_sold_low:    latestSnap.ebay_sold_low,
-    ebay_sold_high:   latestSnap.ebay_sold_high,
-    checked_at:       latestSnap.checked_at,
-  } : selectedCard)
+  const displayCard  = selectedCard
 
   const filteredCards = search.trim()
     ? cards.filter(c => c.name?.toLowerCase().includes(search.toLowerCase()))
@@ -269,8 +252,6 @@ export default function Market() {
         </div>
       )}
 
-      <WeeklyMovers onSelect={(id, name, mover) => { setSelected(id); setSearch(name); setFallbackCard(mover) }} />
-
       <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: 16 }}>
         {/* Card list */}
         <div className="panel" style={{ height: 'fit-content', maxHeight: '70vh', overflowY: 'auto' }}>
@@ -298,7 +279,7 @@ export default function Market() {
           ) : filteredCards.map(c => (
             <div
               key={c.card_id}
-              onClick={() => { setSelected(c.card_id); setFallbackCard(null) }}
+              onClick={() => setSelected(c.card_id)}
               style={{
                 padding: '12px 16px',
                 borderBottom: '1px solid var(--border)',
@@ -499,6 +480,7 @@ export default function Market() {
           )}
         </div>
       </div>
+
     </div>
   )
 }

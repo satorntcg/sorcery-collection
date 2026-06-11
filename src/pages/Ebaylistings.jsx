@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
+const ebayItemNum = url => url?.match(/\/itm\/(\d+)/)?.[1] ?? null
+
 const EBAY_FEE_PCT  = 0.129
 const EBAY_FEE_FLAT = 0.30
 const calcFee = (price) => price * EBAY_FEE_PCT + EBAY_FEE_FLAT
@@ -549,21 +551,18 @@ function EndModal({ listing, onClose, onSaved }) {
     setSaving(true)
 
     if (listing.card_id) {
-      // Single-card listing — decrement quantity_listed, restore quantity_owned
-      const { data: cardRow } = await supabase.from('cards').select('quantity_owned, quantity_listed').eq('id', listing.card_id).single()
+      const { data: cardRow } = await supabase.from('cards').select('quantity_listed').eq('id', listing.card_id).single()
       if (cardRow) await supabase.from('cards').update({
         quantity_listed: Math.max(0, (cardRow.quantity_listed ?? 0) - 1),
-        quantity_owned:  (cardRow.quantity_owned ?? 0) + 1,
       }).eq('id', listing.card_id)
     } else {
-      // Lot listing — restore each card via ebay_listing_cards
+      // Lot listing — decrement each card via ebay_listing_cards
       const { data: lotCards } = await supabase.from('ebay_listing_cards').select('card_id, quantity').eq('listing_id', listing.id)
       for (const lc of (lotCards ?? [])) {
         const qty = lc.quantity ?? 1
-        const { data: cardRow } = await supabase.from('cards').select('quantity_owned, quantity_listed').eq('id', lc.card_id).single()
+        const { data: cardRow } = await supabase.from('cards').select('quantity_listed').eq('id', lc.card_id).single()
         if (cardRow) await supabase.from('cards').update({
           quantity_listed: Math.max(0, (cardRow.quantity_listed ?? 0) - qty),
-          quantity_owned:  (cardRow.quantity_owned ?? 0) + qty,
         }).eq('id', lc.card_id)
       }
     }
@@ -761,7 +760,8 @@ export default function EbayListings() {
     return (
       l.title?.toLowerCase().includes(q) ||
       l.card_name?.toLowerCase().includes(q) ||
-      l.set_name?.toLowerCase().includes(q)
+      l.set_name?.toLowerCase().includes(q) ||
+      l.ebay_url?.includes(q)
     )
   })
 
@@ -886,9 +886,10 @@ export default function EbayListings() {
                     return (
                     <tr key={l.id} ref={isHighlighted ? highlightRef : null} style={isHighlighted ? { background: 'rgba(201,168,76,0.10)', outline: '1px solid rgba(201,168,76,0.4)' } : undefined}>
                       <td>
-                        <div className="name-cell">{l.ebay_url ? <a href={l.ebay_url} target="_blank" rel="noreferrer" style={{ color: 'var(--text-primary)', textDecoration: 'none', borderBottom: '1px dashed var(--border-mid)' }}>{l.card_name || l.title} ↗</a> : (l.card_name || l.title)}</div>
+                        <div className="name-cell">{l.card_name || l.title}</div>
                         {l.card_name && <div className="set-cell">{l.rarity}{l.foil ? ' · Foil' : ''}{l.set_name ? ` · ${l.set_name}` : ''}{l.tcg_market_price ? ` · TCG ${usd(l.tcg_market_price)}` : ''}</div>}
-                        {l.condition && <span className="badge badge-ordinary" style={{ marginTop: 3 }}>{l.condition}</span>}
+                        {l.ebay_url && (() => { const n = ebayItemNum(l.ebay_url); return <a href={l.ebay_url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: 'var(--gold)', textDecoration: 'none', borderBottom: '1px dashed var(--gold)' }}>{n ? `#${n}` : '↗ eBay'}</a> })()}
+                        {l.condition && <span className="badge badge-ordinary" style={{ marginTop: 3, marginLeft: l.ebay_url ? 8 : 0 }}>{l.condition}</span>}
                       </td>
                       <td style={{ fontSize: 12, color: 'var(--text-secondary)', maxWidth: 160 }}>
                         {(() => {
@@ -936,8 +937,9 @@ export default function EbayListings() {
                   <tbody>{sorted.map(l => (
                     <tr key={l.id}>
                       <td>
-                        <div className="name-cell">{l.ebay_url ? <a href={l.ebay_url} target="_blank" rel="noreferrer" style={{ color: 'var(--text-primary)', textDecoration: 'none', borderBottom: '1px dashed var(--border-mid)' }}>{l.card_name || l.title} ↗</a> : (l.card_name || l.title)}</div>
+                        <div className="name-cell">{l.card_name || l.title}</div>
                         {l.card_name && <div className="set-cell">{l.rarity}{l.foil ? ' · Foil' : ''}{l.set_name ? ` · ${l.set_name}` : ''}</div>}
+                        {l.ebay_url && (() => { const n = ebayItemNum(l.ebay_url); return <a href={l.ebay_url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: 'var(--gold)', textDecoration: 'none', borderBottom: '1px dashed var(--gold)' }}>{n ? `#${n}` : '↗ eBay'}</a> })()}
                       </td>
                       <td style={{ fontSize: 12, color: 'var(--text-secondary)', maxWidth: 160 }}>
                         {(() => {

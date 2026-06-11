@@ -48,15 +48,19 @@ export default function Dashboard() {
   useEffect(() => {
     async function load() {
       setLoading(true)
-      const [invRes, alertRes] = await Promise.all([
-        supabase.from('v_inventory_dashboard').select('*'),
-        supabase.from('v_active_alerts').select('*').gte('new_price', 1),
-      ])
-      const inventoryRows = invRes.data ?? []
+      let allCards = [], batchPage = 0
+      while (true) {
+        const { data } = await supabase.from('v_inventory_dashboard').select('*').order('name')
+          .range(batchPage * 1000, (batchPage + 1) * 1000 - 1)
+        allCards = [...allCards, ...(data ?? [])]
+        if (!data || data.length < 1000) break
+        batchPage++
+      }
+      const alertRes = await supabase.from('v_active_alerts').select('*').gte('new_price', 1)
       setInventory(
-        [...inventoryRows]
+        allCards
           .filter(c => (c.quantity_owned ?? 0) > 0)
-          .sort((a, b) => (Number(b.tcgplayer_market) || 0) - (Number(a.tcgplayer_market) || 0))
+          .sort((a, b) => (getMarketValue(b) ?? 0) - (getMarketValue(a) ?? 0))
       )
       setAlerts(alertRes.data ?? [])
       setLoading(false)
@@ -183,7 +187,7 @@ export default function Dashboard() {
               </tr>
             </thead>
             <tbody>
-              {inventory.filter(c => c.tcgplayer_market && (c.quantity_owned ?? 0) > 0).slice(0, 10).map(card => (
+              {inventory.slice(0, 10).map(card => (
                 <tr key={card.card_id ?? card.id}>
                   <td className="name-cell">{card.name}{card.foil ? ' ✦' : ''}</td>
                   <td className="text-muted">{card.set_name}</td>
