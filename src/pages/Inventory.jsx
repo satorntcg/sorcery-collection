@@ -427,12 +427,15 @@ export default function Inventory() {
                 const isExpanded = expanded.has(id)
                 return (
                   <>
-                    <tr key={id} onClick={() => prov.length && toggleExpand(id)}
-                      style={{ cursor: prov.length ? 'pointer' : 'default' }}>
+                    <tr key={id} onClick={() => navigate(`/market?card=${id}`)}
+                      style={{ cursor: 'pointer' }}>
                       <td>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           {prov.length > 0 && (
-                            <span style={{ fontSize: 10, color: 'var(--text-muted)', userSelect: 'none', minWidth: 10 }}>
+                            <span
+                              onClick={e => { e.stopPropagation(); toggleExpand(id) }}
+                              style={{ fontSize: 10, color: 'var(--text-muted)', userSelect: 'none', minWidth: 10, cursor: 'pointer' }}
+                            >
                               {isExpanded ? '▾' : '▸'}
                             </span>
                           )}

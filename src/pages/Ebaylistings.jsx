@@ -594,6 +594,33 @@ function EndModal({ listing, onClose, onSaved }) {
   )
 }
 
+function exportListingsCSV(listings, label) {
+  const escape = v => {
+    const s = String(v ?? '')
+    return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s
+  }
+  const headers = ['Title', 'Cards', 'Price', 'Shipping', 'eBay Fee', 'Net', 'Days Listed', 'Listed Date', 'eBay URL']
+  const rows = listings.map(l => [
+    l.card_name || l.title,
+    l.all_card_names && l.card_count > 1 ? l.all_card_names : '',
+    l.listed_price != null ? Number(l.listed_price).toFixed(2) : '',
+    l.shipping_cost != null ? Number(l.shipping_cost).toFixed(2) : '',
+    l.ebay_fee != null ? Number(l.ebay_fee).toFixed(2) : '',
+    l.net_listed != null ? Number(l.net_listed).toFixed(2) : '',
+    l.days_listed ?? '',
+    l.listed_at ? new Date(l.listed_at).toLocaleDateString('en-US') : '',
+    l.ebay_url ?? '',
+  ])
+  const csv = [headers, ...rows].map(r => r.map(escape).join(',')).join('\n')
+  const blob = new Blob([csv], { type: 'text/csv' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `ebay-${label}-${new Date().toISOString().slice(0, 10)}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 // ── Main page ────────────────────────────────────────────────
 
 // ── Delete sold listing modal ────────────────────────────────
@@ -682,20 +709,34 @@ export default function EbayListings() {
     return () => clearTimeout(timer)
   }, [highlightId, loading])
 
+  const fetchCards = useCallback(async () => {
+    if (cards.length > 0) return  // already loaded
+    let allCards = [], cardPage = 0
+    while (true) {
+      const { data } = await supabase
+        .from('v_latest_prices')
+        .select('card_id, name, set_name, rarity, foil, tcg_market_price, cost_basis')
+        .order('name')
+        .range(cardPage * 1000, (cardPage + 1) * 1000 - 1)
+      allCards = [...allCards, ...(data ?? [])]
+      if (!data || data.length < 1000) break
+      cardPage++
+    }
+    setCards(allCards)
+  }, [cards.length])
+
   const fetchAll = useCallback(async () => {
     setLoading(true)
-    const [activeRes, soldRes, pnlRes, cardsRes] = await Promise.all([
+    const [activeRes, soldRes, pnlRes] = await Promise.all([
       supabase.from('v_ebay_active').select('*'),
       supabase.from('v_ebay_sold').select('*'),
       supabase.from('v_global_pnl').select('*').single(),
-      supabase.from('v_latest_prices').select('card_id, name, set_name, rarity, foil, tcg_market_price, cost_basis').order('name'),
     ])
     setListings([
       ...(activeRes.data || []).map(r => ({ ...r, status: 'active' })),
       ...(soldRes.data  || []).map(r => ({ ...r, status: 'sold'   })),
     ])
     setPnl(pnlRes.data)
-    setCards(cardsRes.data || [])
     setLoading(false)
   }, [])
 
@@ -750,7 +791,16 @@ export default function EbayListings() {
           <h1 className="page-title">eBay Listings</h1>
           <p className="page-subtitle">{activeListings.length} active · {soldListings.length} sold</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowCreate(true)}>+ New listing</button>
+        <div className="flex gap-8">
+          <button
+            className="btn btn-ghost"
+            onClick={() => exportListingsCSV(activeListings, 'active')}
+            disabled={loading || activeListings.length === 0}
+          >
+            ↓ Export active CSV
+          </button>
+          <button className="btn btn-primary" onClick={() => { fetchCards(); setShowCreate(true) }}>+ New listing</button>
+        </div>
       </div>
 
       {/* Summary metrics */}
@@ -862,7 +912,7 @@ export default function EbayListings() {
                       <td>
                         <div style={{ display: 'flex', gap: 6 }}>
                           <button className="btn btn-sm btn-ghost" style={{ color: 'var(--success)', borderColor: 'rgba(76,175,110,0.3)' }} onClick={() => setSoldTarget(l)}>Sold</button>
-                          <button className="btn btn-sm btn-ghost" onClick={() => setEditTarget(l)}>Edit</button>
+                          <button className="btn btn-sm btn-ghost" onClick={() => { fetchCards(); setEditTarget(l) }}>Edit</button>
                           <button className="btn btn-sm btn-ghost btn-danger" onClick={() => setEndTarget(l)}>End</button>
                         </div>
                       </td>

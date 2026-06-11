@@ -36,13 +36,41 @@ export default function Market() {
 
   useEffect(() => {
     async function load() {
-      const { data } = await supabase
-        .from('v_latest_prices')
-        .select('card_id, name, set_name, rarity, foil, tcgplayer_market, tcgplayer_low, ebay_sold_avg, ebay_sold_low, ebay_sold_high, ebay_sold_count, checked_at, tcgplayer_id')
-        .order('name', { ascending: true })
-      setCards(data ?? [])
-      // Most recent checked_at across all cards = last global refresh
-      const latest = (data ?? []).reduce((max, c) => {
+      let allCards = [], cardPage = 0
+      while (true) {
+        const { data } = await supabase
+          .from('cards')
+          .select('id, name, set_name, rarity, foil, tcgplayer_id')
+          .order('name', { ascending: true })
+          .range(cardPage * 1000, (cardPage + 1) * 1000 - 1)
+        allCards = [...allCards, ...(data ?? [])]
+        if (!data || data.length < 1000) break
+        cardPage++
+      }
+
+      let allPrices = [], pricePage = 0
+      while (true) {
+        const { data } = await supabase
+          .from('v_latest_prices')
+          .select('card_id, tcgplayer_market, tcgplayer_low, ebay_sold_avg, ebay_sold_low, ebay_sold_high, ebay_sold_count, checked_at')
+          .range(pricePage * 1000, (pricePage + 1) * 1000 - 1)
+        allPrices = [...allPrices, ...(data ?? [])]
+        if (!data || data.length < 1000) break
+        pricePage++
+      }
+
+      const priceMap = new Map(allPrices.map(p => [p.card_id, p]))
+      const merged = allCards.map(c => ({
+        card_id: c.id,
+        name: c.name,
+        set_name: c.set_name,
+        rarity: c.rarity,
+        foil: c.foil,
+        tcgplayer_id: c.tcgplayer_id,
+        ...(priceMap.get(c.id) ?? {}),
+      }))
+      setCards(merged)
+      const latest = allPrices.reduce((max, c) => {
         if (!c.checked_at) return max
         return !max || new Date(c.checked_at) > new Date(max) ? c.checked_at : max
       }, null)
