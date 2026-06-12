@@ -66,7 +66,7 @@ export default function Boxes() {
 
     const { data: packCards } = await supabase
       .from('pack_cards')
-      .select('quantity, pack_id, packs ( pack_number ), cards ( id, name, rarity, condition, tcgplayer_id )')
+      .select('quantity, pack_id, packs ( pack_number ), cards ( id, name, rarity, condition, foil, cost_basis, tcgplayer_id )')
       .in('pack_id', packIds)
 
     const cardIds = (packCards ?? []).map(r => r.cards?.id).filter(Boolean)
@@ -137,8 +137,9 @@ export default function Boxes() {
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  const totalCost  = boxes.reduce((s, b) => s + Number(b.purchase_price || 0), 0)
-  const totalValue = boxes.reduce((s, b) => s + Number(b.cards_market_value || 0), 0)
+  const pnlBoxes   = boxes.filter(b => (b.distinct_cards_pulled ?? 0) > 0)
+  const totalCost  = pnlBoxes.reduce((s, b) => s + Number(b.purchase_price || 0), 0)
+  const totalValue = pnlBoxes.reduce((s, b) => s + Number(b.cards_market_value || 0), 0)
   const totalPnl   = totalValue - totalCost
 
   const selectedBox = boxes.find(b => b.id === selected)
@@ -288,7 +289,7 @@ export default function Boxes() {
         <div className="metric-card">
           <div className="metric-label">Total invested</div>
           <div className="metric-value">{usd(totalCost)}</div>
-          <div className="metric-sub">{boxes.length} boxes</div>
+          <div className="metric-sub">{pnlBoxes.length} of {boxes.length} boxes with cards</div>
         </div>
         <div className="metric-card">
           <div className="metric-label">Cards market value</div>
@@ -304,7 +305,7 @@ export default function Boxes() {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: selected ? '1fr 1fr' : '1fr', gap: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: selected ? '380px 1fr' : '1fr', gap: 16 }}>
 
         {/* Boxes list */}
         <div>
@@ -319,19 +320,30 @@ export default function Boxes() {
             <div className="panel">
               <table className="data-table" style={{ tableLayout: 'fixed' }}>
                 <colgroup>
-                  <col style={{ width: '30%' }} />
-                  <col style={{ width: '14%' }} />
-                  <col style={{ width: '13%' }} />
-                  <col style={{ width: '13%' }} />
-                  <col style={{ width: '13%' }} />
-                  <col style={{ width: '17%' }} />
+                  {selected ? (
+                    <>
+                      <col style={{ width: '42%' }} />
+                      <col style={{ width: '18%' }} />
+                      <col style={{ width: '20%' }} />
+                      <col style={{ width: '20%' }} />
+                    </>
+                  ) : (
+                    <>
+                      <col style={{ width: '28%' }} />
+                      <col style={{ width: '14%' }} />
+                      <col style={{ width: '13%' }} />
+                      <col style={{ width: '13%' }} />
+                      <col style={{ width: '13%' }} />
+                      <col style={{ width: '19%' }} />
+                    </>
+                  )}
                 </colgroup>
                 <thead>
                   <tr>
                     <th>Box</th>
-                    <th style={{ whiteSpace: 'nowrap' }}>Type</th>
+                    {!selected && <th style={{ whiteSpace: 'nowrap' }}>Type</th>}
                     <th className="text-right" style={{ whiteSpace: 'nowrap' }}>Cost</th>
-                    <th className="text-right" style={{ whiteSpace: 'nowrap' }}>Card value</th>
+                    {!selected && <th className="text-right" style={{ whiteSpace: 'nowrap' }}>Card value</th>}
                     <th className="text-right" style={{ whiteSpace: 'nowrap' }}>P&L</th>
                     <th className="text-right" style={{ whiteSpace: 'nowrap' }}>Cards</th>
                   </tr>
@@ -351,13 +363,15 @@ export default function Boxes() {
                         <div className="name-cell" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {box.name ?? box.set_name}
                         </div>
-                        <div className="set-cell">{date(box.purchased_at)}</div>
+                        <div className="set-cell">{selected ? box.box_type?.replace(/_/g, ' ') : date(box.purchased_at)}</div>
                       </td>
-                      <td className="text-muted" style={{ fontSize: 12 }}>
-                        {box.box_type?.replace(/_/g, ' ')}
-                      </td>
+                      {!selected && (
+                        <td className="text-muted" style={{ fontSize: 12 }}>
+                          {box.box_type?.replace(/_/g, ' ')}
+                        </td>
+                      )}
                       <td className="text-right">{usd(box.purchase_price)}</td>
-                      <td className="text-right text-gold">{usd(box.cards_market_value)}</td>
+                      {!selected && <td className="text-right text-gold">{usd(box.cards_market_value)}</td>}
                       <td className="text-right">
                         <span style={{ color: Number(box.gross_pnl) >= 0 ? 'var(--success)' : 'var(--danger)' }}>
                           {fmtPnl(box.gross_pnl)}
@@ -407,18 +421,31 @@ export default function Boxes() {
               </div>
 
               {/* Box P&L summary */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', borderBottom: '1px solid var(--border)' }}>
-                {[
-                  ['Cost',       usd(selectedBox?.purchase_price),    null],
-                  ['Card value', usd(selectedBox?.cards_market_value), 'var(--gold-light)'],
-                  ['P&L',        fmtPnl(selectedBox?.gross_pnl),       Number(selectedBox?.gross_pnl) >= 0 ? 'var(--success)' : 'var(--danger)'],
-                ].map(([label, val, color]) => (
-                  <div key={label} style={{ padding: '12px 16px', borderRight: '1px solid var(--border)' }}>
-                    <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-muted)', marginBottom: 4 }}>{label}</div>
-                    <div className="metric-value" style={{ fontSize: 18, color: color ?? 'var(--text-primary)' }}>{val}</div>
+              {(() => {
+                const trueValue = boxCards.reduce((s, r) => {
+                  const p = r.price?.tcgplayer_market ?? 0
+                  return p >= 2 ? s + p * r.quantity : s
+                }, 0)
+                return (
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr', borderBottom: '1px solid var(--border)' }}>
+                    {(() => {
+                      const truePnl = trueValue - (selectedBox?.purchase_price ?? 0)
+                      return [
+                        ['Cost',           usd(selectedBox?.purchase_price),    null],
+                        ['Card value',     usd(selectedBox?.cards_market_value), 'var(--gold-light)'],
+                        ['True value ≥$2', usd(trueValue),                      'var(--gold)'],
+                        ['P&L',            fmtPnl(selectedBox?.gross_pnl),       Number(selectedBox?.gross_pnl) >= 0 ? 'var(--success)' : 'var(--danger)'],
+                        ['True P&L',       fmtPnl(truePnl),                      truePnl >= 0 ? 'var(--success)' : 'var(--danger)'],
+                      ]
+                    })().map(([label, val, color]) => (
+                      <div key={label} style={{ padding: '12px 16px', borderRight: '1px solid var(--border)' }}>
+                        <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.1em', color: 'var(--text-muted)', marginBottom: 4 }}>{label}</div>
+                        <div className="metric-value" style={{ fontSize: 18, color: color ?? 'var(--text-primary)' }}>{val}</div>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                )
+              })()}
 
               {/* Cards table */}
               {cardsLoading ? (
@@ -434,12 +461,13 @@ export default function Boxes() {
               ) : (
                 <table className="data-table" style={{ tableLayout: 'fixed' }}>
                   <colgroup>
-                    <col style={{ width: '40%' }} />
-                    <col style={{ width: '10%' }} />
+                    <col style={{ width: '35%' }} />
+                    <col style={{ width: '9%' }} />
                     <col style={{ width: '18%' }} />
-                    <col style={{ width: '8%' }} />
+                    <col style={{ width: '7%' }} />
                     <col style={{ width: '12%' }} />
-                    <col style={{ width: '12%' }} />
+                    <col style={{ width: '10%' }} />
+                    <col style={{ width: '9%' }} />
                   </colgroup>
                   <thead>
                     <tr>
@@ -447,6 +475,7 @@ export default function Boxes() {
                       <th>Pack</th>
                       <th>Rarity</th>
                       <th className="text-right">Qty</th>
+                      <th className="text-right">Cost</th>
                       <th className="text-right">TCGPlayer</th>
                       <th className="text-right">Value</th>
                     </tr>
@@ -458,12 +487,14 @@ export default function Boxes() {
                         const card     = row.cards
                         const mktPrice = row.price?.tcgplayer_market
                         const value    = mktPrice ? mktPrice * row.quantity : null
+                        const costBasis = card?.cost_basis != null ? Number(card.cost_basis) * row.quantity : null
                         return (
-                          <tr key={i}>
-                            <td className="name-cell" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{card?.name}</td>
+                          <tr key={i} style={card?.foil ? { background: 'rgba(201,168,76,0.07)', borderLeft: '2px solid rgba(201,168,76,0.4)' } : undefined}>
+                            <td className="name-cell" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{card?.name}{card?.foil ? ' ✦' : ''}</td>
                             <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>#{row.pack_number ?? '—'}</td>
                             <td><span className={`badge badge-${card?.rarity}`}>{card?.rarity}</span></td>
                             <td className="text-right">{row.quantity}</td>
+                            <td className="text-right text-muted">{costBasis != null ? usd(costBasis) : '—'}</td>
                             <td className="text-right">{usd(mktPrice)}</td>
                             <td className="text-right text-gold">{usd(value)}</td>
                           </tr>
@@ -472,11 +503,22 @@ export default function Boxes() {
                   </tbody>
                   <tfoot>
                     <tr>
-                      <td colSpan={5} style={{ padding: '10px 14px', fontSize: 11, color: 'var(--text-muted)', borderTop: '1px solid var(--border)' }}>
+                      <td colSpan={6} style={{ padding: '10px 14px 4px', fontSize: 11, color: 'var(--text-muted)', borderTop: '1px solid var(--border)' }}>
                         Total card value
                       </td>
-                      <td className="text-right text-gold" style={{ padding: '10px 14px', fontWeight: 500, borderTop: '1px solid var(--border)' }}>
+                      <td className="text-right text-gold" style={{ padding: '10px 14px 4px', fontWeight: 500, borderTop: '1px solid var(--border)' }}>
                         {usd(boxCards.reduce((s, r) => s + (r.price?.tcgplayer_market ?? 0) * r.quantity, 0))}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td colSpan={6} style={{ padding: '4px 14px 10px', fontSize: 11, color: 'var(--text-muted)' }}>
+                        True value <span style={{ color: 'var(--gold)', opacity: 0.7 }}>(≥$2 cards only)</span>
+                      </td>
+                      <td className="text-right" style={{ padding: '4px 14px 10px', fontWeight: 500, color: 'var(--gold)' }}>
+                        {usd(boxCards.reduce((s, r) => {
+                          const p = r.price?.tcgplayer_market ?? 0
+                          return p >= 2 ? s + p * r.quantity : s
+                        }, 0))}
                       </td>
                     </tr>
                   </tfoot>
