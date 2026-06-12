@@ -13,16 +13,17 @@ const CONDITIONS = ['near_mint', 'lightly_played', 'moderately_played', 'heavily
 const BLANK = { name: '', set_name: 'Gothic', box_type: 'booster_box', purchase_price: '', pack_count: '36', pack_msrp: '5', purchased_at: '', seller: '', notes: '' }
 
 const PULL_BLANK = {
-  mode:           'search',   // 'search' | 'new'
-  cardId:         null,
-  cardName:       '',
-  rarity:         'ordinary',
-  condition:      'near_mint',
-  foil:           false,
-  setName:        'Gothic',
-  packId:         '',
-  newPackNumber:  '',
-  quantity:       1,
+  mode:             'search',   // 'search' | 'new'
+  cardId:           null,
+  cardName:         '',
+  tcgplayer_market: null,
+  rarity:           'ordinary',
+  condition:        'near_mint',
+  foil:             false,
+  setName:          'Gothic',
+  packId:           '',
+  newPackNumber:    '',
+  quantity:         1,
 }
 
 export default function Boxes() {
@@ -44,7 +45,8 @@ export default function Boxes() {
   const [cardSearch,   setCardSearch]   = useState('')
   const [searchOpen,   setSearchOpen]   = useState(false)
   const [pullSaving,   setPullSaving]   = useState(false)
-  const searchRef = useRef(null)
+  const searchRef       = useRef(null)
+  const justSelectedRef = useRef(false)
 
   async function load() {
     setLoading(true)
@@ -103,14 +105,24 @@ export default function Boxes() {
   // Card search autocomplete
   useEffect(() => {
     if (!cardSearch.trim()) { setCardResults([]); return }
+    if (justSelectedRef.current) { justSelectedRef.current = false; return }
     const t = setTimeout(async () => {
-      const { data } = await supabase
+      const { data: cardData } = await supabase
         .from('cards')
         .select('id, name, rarity, set_name, foil')
         .ilike('name', `%${cardSearch.trim()}%`)
         .order('name')
         .limit(8)
-      setCardResults(data ?? [])
+      if (cardData?.length) {
+        const { data: priceData } = await supabase
+          .from('v_latest_prices')
+          .select('card_id, tcgplayer_market')
+          .in('card_id', cardData.map(c => c.id))
+        const priceMap = new Map((priceData ?? []).map(p => [p.card_id, p.tcgplayer_market]))
+        setCardResults(cardData.map(c => ({ ...c, tcgplayer_market: priceMap.get(c.id) ?? null })))
+      } else {
+        setCardResults([])
+      }
       setSearchOpen(true)
     }, 200)
     return () => clearTimeout(t)
@@ -162,14 +174,15 @@ export default function Boxes() {
     if (pullForm.mode === 'search' && !pullForm.cardId) return
     if (pullForm.mode === 'new' && !pullForm.cardName.trim()) return
     setPullItems(prev => [...prev, {
-      cardId:    pullForm.cardId,
-      cardName:  pullForm.cardName,
-      mode:      pullForm.mode,
-      rarity:    pullForm.rarity,
-      condition: pullForm.condition,
-      foil:      pullForm.foil,
-      setName:   pullForm.setName,
-      quantity:  Number(pullForm.quantity) || 1,
+      cardId:           pullForm.cardId,
+      cardName:         pullForm.cardName,
+      tcgplayer_market: pullForm.tcgplayer_market,
+      mode:             pullForm.mode,
+      rarity:           pullForm.rarity,
+      condition:        pullForm.condition,
+      foil:             pullForm.foil,
+      setName:          pullForm.setName,
+      quantity:         Number(pullForm.quantity) || 1,
     }])
     setCardSearch('')
     setCardResults([])
@@ -249,7 +262,8 @@ export default function Boxes() {
   }
 
   function selectCard(card) {
-    setPullForm(prev => ({ ...prev, mode: 'search', cardId: card.id, cardName: card.name }))
+    justSelectedRef.current = true
+    setPullForm(prev => ({ ...prev, mode: 'search', cardId: card.id, cardName: card.name, tcgplayer_market: card.tcgplayer_market ?? null }))
     setCardSearch(card.name)
     setSearchOpen(false)
   }
@@ -350,8 +364,7 @@ export default function Boxes() {
                         </span>
                       </td>
                       <td>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
-                          <span className="text-muted" style={{ fontSize: 13 }}>{box.distinct_cards_pulled ?? 0}</span>
+                        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
                           {!box.opened_at && !box.packs_opened ? (
                             <button
                               className="btn btn-ghost btn-sm"
@@ -361,7 +374,10 @@ export default function Boxes() {
                               Mark opened
                             </button>
                           ) : (
-                            <span className="badge badge-ok" style={{ fontSize: 10 }}>Opened</span>
+                            <>
+                              <span className="badge badge-ok" style={{ fontSize: 10 }}>Opened</span>
+                              <span className="text-muted" style={{ fontSize: 11 }}>{box.distinct_cards_pulled ?? 0} cards</span>
+                            </>
                           )}
                         </div>
                       </td>
@@ -594,6 +610,9 @@ export default function Boxes() {
                           <span className={`badge badge-${card.rarity}`} style={{ fontSize: 10 }}>{card.rarity}</span>
                           <span style={{ flex: 1, fontSize: 13, color: 'var(--text-primary)' }}>{card.name}{card.foil ? ' ✦' : ''}</span>
                           <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{card.set_name}</span>
+                          {card.tcgplayer_market != null && (
+                            <span style={{ fontSize: 12, color: 'var(--gold)', fontWeight: 500 }}>{usd(card.tcgplayer_market)}</span>
+                          )}
                         </div>
                       ))}
                       {cardSearch.trim() && (
@@ -668,6 +687,7 @@ export default function Boxes() {
                       {item.mode === 'new' && <span className={`badge badge-${item.rarity}`} style={{ fontSize: 10 }}>{item.rarity}</span>}
                       <span style={{ flex: 1, color: 'var(--text-primary)' }}>{item.cardName}{item.foil ? ' ✦' : ''}</span>
                       {item.quantity > 1 && <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>×{item.quantity}</span>}
+                      {item.tcgplayer_market != null && <span style={{ color: 'var(--gold)', fontSize: 12, fontWeight: 500 }}>{usd(item.tcgplayer_market)}</span>}
                       <button onClick={() => removeFromPull(i)} style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '0 2px' }}>×</button>
                     </div>
                   ))}

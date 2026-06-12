@@ -163,17 +163,19 @@ export default function ListingSuggestions() {
     async function load() {
       setLoading(true)
 
-      const [{ data }, { data: lotData }] = await Promise.all([
+      const [{ data, error: fetchErr }, { data: lotData }] = await Promise.all([
         supabase
           .from('v_inventory_dashboard')
           .select('id, name, set_name, rarity, foil, card_type, tcgplayer_market, cost_basis, quantity_owned, quantity_listed, quantity_available, active_listing_count')
           .or('rarity.in.(unique,elite,exceptional),foil.eq.true,card_type.eq.site')
+          .gt('quantity_owned', 0)
           .order('tcgplayer_market', { ascending: false }),
         // Fetch card IDs in active lot listings (card_id is null on the listing itself)
         supabase
           .from('ebay_listing_cards')
           .select('card_id, quantity, ebay_listings!listing_id(status)')
       ])
+      if (fetchErr) { setError(`Failed to load inventory: ${fetchErr.message}`); setLoading(false); return }
 
       // Build map: card_id → total quantity in active lot listings
       const lotListedMap = {}
@@ -326,8 +328,10 @@ export default function ListingSuggestions() {
 
       {groups.length === 0 ? (
         <div className="empty-state">
-          <div className="empty-state-icon">🎉</div>
-          All eligible cards are already listed on eBay!
+          <div className="empty-state-icon">{cards.length === 0 ? '📭' : '🎉'}</div>
+          {cards.length === 0
+            ? 'No unlisted elite/unique/foil cards with TCGPlayer prices found — run a price check first.'
+            : 'All eligible cards are already listed on eBay!'}
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

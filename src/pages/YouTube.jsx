@@ -322,6 +322,8 @@ export default function YouTube() {
   const [packData, setPackData]       = useState([])
   const [packLoading, setPackLoading] = useState(false)
   const [openingMeta, setOpeningMeta] = useState(null)
+  const [editingTitle, setEditingTitle] = useState(null)
+  const [titleDraft, setTitleDraft]     = useState('')
   const [editingUrl, setEditingUrl]     = useState(null)
   const [urlDraft, setUrlDraft]         = useState('')
   const [editingShortsUrl, setEditingShortsUrl] = useState(null)
@@ -414,6 +416,14 @@ export default function YouTube() {
     await supabase.from('youtube_openings').delete().eq('id', id)
     if (selected === id) { setSelected(null); setPackData([]); setOpeningMeta(null) }
     load()
+  }
+
+  async function saveTitle(id) {
+    if (!titleDraft.trim()) return
+    await supabase.from('youtube_openings').update({ title: titleDraft.trim() }).eq('id', id)
+    setEditingTitle(null)
+    load()
+    if (selected === id) loadOpening(id)
   }
 
   async function saveUrl(id) {
@@ -521,10 +531,29 @@ export default function YouTube() {
                   >
                     <div style={{ padding: '14px 16px' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontWeight: 500, fontSize: 13, color: 'var(--text-primary)', marginBottom: 3 }}>
-                            {o.title}
-                          </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          {editingTitle === o.id ? (
+                            <div style={{ display: 'flex', gap: 6, marginBottom: 4 }} onClick={e => e.stopPropagation()}>
+                              <input
+                                className="form-input"
+                                value={titleDraft}
+                                onChange={e => setTitleDraft(e.target.value)}
+                                onKeyDown={e => { if (e.key === 'Enter') saveTitle(o.id); if (e.key === 'Escape') setEditingTitle(null) }}
+                                autoFocus
+                                style={{ fontSize: 12, padding: '4px 8px', flex: 1 }}
+                              />
+                              <button className="btn btn-primary btn-sm" style={{ fontSize: 11 }} onClick={() => saveTitle(o.id)}>Save</button>
+                              <button className="btn btn-ghost btn-sm" style={{ fontSize: 11 }} onClick={() => setEditingTitle(null)}>✕</button>
+                            </div>
+                          ) : (
+                            <div
+                              style={{ fontWeight: 500, fontSize: 13, color: 'var(--text-primary)', marginBottom: 3, cursor: 'text', display: 'flex', alignItems: 'center', gap: 6 }}
+                              onClick={e => { e.stopPropagation(); setEditingTitle(o.id); setTitleDraft(o.title) }}
+                            >
+                              {o.title}
+                              <span style={{ fontSize: 10, color: 'var(--text-muted)', opacity: 0.6 }}>✎</span>
+                            </div>
+                          )}
                           <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                             {boxLabel} · {date(o.filmed_at)} · {o.packs_in_video} packs
                           </div>

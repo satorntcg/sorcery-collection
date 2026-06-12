@@ -593,6 +593,105 @@ function EndModal({ listing, onClose, onSaved }) {
   )
 }
 
+// ── Link card modal ──────────────────────────────────────────
+function LinkCardModal({ listing, cards, onClose, onSaved }) {
+  const [cardSearch, setCardSearch] = useState('')
+  const [linkedCards, setLinkedCards] = useState([])
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+
+  const filteredCards = cardSearch.length > 1
+    ? (cards || []).filter(c =>
+        c.name?.toLowerCase().includes(cardSearch.toLowerCase()) ||
+        c.set_name?.toLowerCase().includes(cardSearch.toLowerCase())
+      ).slice(0, 10)
+    : []
+
+  function addCard(card) {
+    setLinkedCards(prev => prev.find(c => c.id === card.id) ? prev : [...prev, card])
+    setCardSearch('')
+  }
+
+  async function handleSave() {
+    if (!linkedCards.length) { setError('Select at least one card.'); return }
+    setSaving(true); setError('')
+    try {
+      await supabase.from('ebay_listings').update({
+        card_id: linkedCards.length === 1 ? linkedCards[0].id : null,
+      }).eq('id', listing.id)
+
+      await supabase.from('ebay_listing_cards').delete().eq('listing_id', listing.id)
+      const perCardPrice = parseFloat(((listing.listed_price ?? 0) / linkedCards.length).toFixed(2))
+      await supabase.from('ebay_listing_cards').insert(
+        linkedCards.map(c => ({ listing_id: listing.id, card_id: c.id, price: perCardPrice, quantity: 1 }))
+      )
+
+      for (const c of linkedCards) {
+        const { data: cardRow } = await supabase.from('cards').select('quantity_listed').eq('id', c.id).single()
+        if (cardRow) await supabase.from('cards').update({ quantity_listed: (cardRow.quantity_listed ?? 0) + 1 }).eq('id', c.id)
+      }
+      onSaved()
+    } catch (e) { setError(e.message) } finally { setSaving(false) }
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 480 }} onClick={e => e.stopPropagation()}>
+        <div className="modal-header">
+          <span className="modal-title">Link card to listing</span>
+          <button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>
+        </div>
+        <div className="modal-body">
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16 }}>{listing.title}</div>
+
+          {linkedCards.length > 0 && (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+              {linkedCards.map(c => (
+                <div key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, padding: '3px 8px', background: 'rgba(201,168,76,0.08)', border: '1px solid var(--border-mid)', borderRadius: 4, color: 'var(--gold-light)' }}>
+                  {c.name}{c.foil ? ' ✦' : ''}
+                  <button onClick={() => setLinkedCards(prev => prev.filter(x => x.id !== c.id))} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 14, padding: 0, lineHeight: 1 }}>×</button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="form-group" style={{ position: 'relative' }}>
+            <input
+              className="form-input"
+              placeholder="Search cards to link…"
+              value={cardSearch}
+              onChange={e => setCardSearch(e.target.value)}
+              autoFocus
+            />
+            {filteredCards.length > 0 && (
+              <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', background: 'var(--bg-void)', zIndex: 10, maxHeight: 220, overflowY: 'auto' }}>
+                {filteredCards.map(c => (
+                  <div
+                    key={c.card_id}
+                    onClick={() => addCard({ id: c.card_id, name: c.name, rarity: c.rarity, foil: c.foil, set_name: c.set_name })}
+                    style={{ padding: '8px 12px', cursor: 'pointer', fontSize: 13, borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                  >
+                    <span style={{ color: 'var(--text-primary)' }}>{c.name}{c.foil ? ' ✦' : ''}</span>
+                    <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{c.rarity} · {c.set_name}{c.tcg_market_price ? ` · ${usd(c.tcg_market_price)}` : ''}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {error && <div className="alert-item danger mt-16"><span className="alert-content">{error}</span></div>}
+        </div>
+        <div className="modal-footer">
+          <button className="btn" onClick={onClose}>Cancel</button>
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving || !linkedCards.length}>
+            {saving ? 'Saving…' : `Link ${linkedCards.length || ''} card${linkedCards.length !== 1 ? 's' : ''}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function exportListingsCSV(listings, label) {
   const escape = v => {
     const s = String(v ?? '')
@@ -677,6 +776,7 @@ export default function EbayListings() {
   const [tab, setTab]           = useState('active')
   const [search, setSearch]         = useState('')
   const [unlinkedOnly, setUnlinkedOnly] = useState(false)
+  const [noUrlOnly, setNoUrlOnly]       = useState(false)
   const [listings, setListings] = useState([])
   const [cards, setCards]       = useState([])
   const [pnl, setPnl]           = useState(null)
@@ -686,6 +786,7 @@ export default function EbayListings() {
   const [editTarget, setEditTarget] = useState(null)
   const [soldTarget, setSoldTarget] = useState(null)
   const [endTarget, setEndTarget]   = useState(null)
+  const [linkTarget, setLinkTarget] = useState(null)
   const [deleteSoldTarget, setDeleteSoldTarget] = useState(null)
   const [sortBy, setSortBy]     = useState('listed_at')
   const [sortDir, setSortDir]   = useState('desc')
@@ -748,13 +849,14 @@ export default function EbayListings() {
 
   const onSaved = () => {
     fetchAll()
-    setShowCreate(false); setEditTarget(null); setSoldTarget(null); setEndTarget(null); setDeleteSoldTarget(null)
+    setShowCreate(false); setEditTarget(null); setSoldTarget(null); setEndTarget(null); setLinkTarget(null); setDeleteSoldTarget(null)
   }
 
   const activeListings = listings.filter(l => l.status === 'active')
   const soldListings   = listings.filter(l => l.status === 'sold')
   const tabListings    = (tab === 'active' ? activeListings : soldListings).filter(l => {
-    if (unlinkedOnly && (l.card_id || (l.card_count ?? 0) > 0)) return false
+    if (unlinkedOnly && (l.card_id || l.card_name || (l.card_count ?? 0) > 0)) return false
+    if (noUrlOnly && l.ebay_url) return false
     if (!search) return true
     const q = search.toLowerCase()
     return (
@@ -853,7 +955,14 @@ export default function EbayListings() {
           onClick={() => setUnlinkedOnly(p => !p)}
           style={{ whiteSpace: 'nowrap' }}
         >
-          {unlinkedOnly ? '⚠ Unlinked only' : 'Show unlinked'}
+          {unlinkedOnly ? '⚠ Unlinked Cards' : 'Show Unlinked Cards'}
+        </button>
+        <button
+          className={`btn btn-sm ${noUrlOnly ? 'btn-primary' : 'btn-ghost'}`}
+          onClick={() => setNoUrlOnly(p => !p)}
+          style={{ whiteSpace: 'nowrap' }}
+        >
+          {noUrlOnly ? '⚠ No eBay URL' : 'Show No eBay URL'}
         </button>
       </div>
 
@@ -912,6 +1021,9 @@ export default function EbayListings() {
                       <td className="text-muted" style={{ fontSize: 12 }}>{fmtDate(l.listed_at)}</td>
                       <td>
                         <div style={{ display: 'flex', gap: 6 }}>
+                          {!l.card_name && !l.card_id && !(l.card_count > 0) && (
+                            <button className="btn btn-sm btn-ghost" style={{ color: 'var(--gold)', borderColor: 'rgba(201,168,76,0.3)' }} onClick={() => { fetchCards(); setLinkTarget(l) }}>Link</button>
+                          )}
                           <button className="btn btn-sm btn-ghost" style={{ color: 'var(--success)', borderColor: 'rgba(76,175,110,0.3)' }} onClick={() => setSoldTarget(l)}>Sold</button>
                           <button className="btn btn-sm btn-ghost" onClick={() => { fetchCards(); setEditTarget(l) }}>Edit</button>
                           <button className="btn btn-sm btn-ghost btn-danger" onClick={() => setEndTarget(l)}>End</button>
@@ -1016,6 +1128,7 @@ export default function EbayListings() {
       {editTarget  && <EditModal  listing={editTarget} cards={cards} onClose={() => setEditTarget(null)} onSaved={onSaved} />}
       {soldTarget  && <SoldModal  listing={soldTarget} onClose={() => setSoldTarget(null)} onSaved={onSaved} />}
       {endTarget   && <EndModal   listing={endTarget}  onClose={() => setEndTarget(null)}  onSaved={onSaved} />}
+      {linkTarget  && <LinkCardModal listing={linkTarget} cards={cards} onClose={() => setLinkTarget(null)} onSaved={onSaved} />}
       {deleteSoldTarget && <DeleteSoldModal listing={deleteSoldTarget} onClose={() => setDeleteSoldTarget(null)} onSaved={onSaved} />}
     </div>
   )
