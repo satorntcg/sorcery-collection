@@ -23,6 +23,7 @@ function CreateModal({ cards, onClose, onSaved }) {
   const [condition, setCondition]     = useState('Near Mint')
   const [ebayUrl, setEbayUrl]         = useState('')
   const [notes, setNotes]             = useState('')
+  const [quantity, setQuantity]       = useState(1)
   const [saving, setSaving]           = useState(false)
   const [error, setError]             = useState('')
 
@@ -59,6 +60,7 @@ function CreateModal({ cards, onClose, onSaved }) {
     if (!title.trim()) { setError('Title is required.'); return }
     if (totalPrice <= 0) { setError('At least one card needs a price.'); return }
     setSaving(true); setError('')
+    const listingQty = Math.max(1, parseInt(quantity) || 1)
     try {
       const cardBreakdown = selectedCards.map(c => ({ name: c.name, price: parseFloat(prices[c.card_id]) || 0 }))
       const { error: err } = await supabase.from('ebay_listings').insert({
@@ -67,6 +69,7 @@ function CreateModal({ cards, onClose, onSaved }) {
         listed_price:  parseFloat(totalPrice.toFixed(2)),
         shipping_cost: s,
         condition,
+        quantity:      listingQty,
         notes: [notes.trim(), selectedIds.length > 1 ? `Cards: ${cardBreakdown.map(c => `${c.name} ($${c.price.toFixed(2)})`).join(', ')}` : null].filter(Boolean).join('\n') || null,
         ebay_url: ebayUrl.trim() || null,
         cost_basis: totalCostBasis > 0 ? parseFloat(totalCostBasis.toFixed(4)) : null,
@@ -75,7 +78,7 @@ function CreateModal({ cards, onClose, onSaved }) {
       if (err) throw err
       for (const c of selectedCards) {
         const { data: cardRow } = await supabase.from('cards').select('quantity_listed').eq('id', c.card_id).single()
-        if (cardRow) await supabase.from('cards').update({ quantity_listed: (cardRow.quantity_listed ?? 0) + 1 }).eq('id', c.card_id)
+        if (cardRow) await supabase.from('cards').update({ quantity_listed: (cardRow.quantity_listed ?? 0) + listingQty }).eq('id', c.card_id)
       }
       onSaved()
     } catch (e) { setError(e.message) } finally { setSaving(false) }
@@ -193,6 +196,10 @@ function CreateModal({ cards, onClose, onSaved }) {
                 <input className="form-input" type="number" min="0" step="0.01" value={shipping} onChange={e => setShipping(e.target.value)} />
               </div>
               <div className="form-group">
+                <label className="form-label">Qty listed</label>
+                <input className="form-input" type="number" min="1" step="1" value={quantity} onChange={e => setQuantity(e.target.value)} style={{ textAlign: 'center' }} />
+              </div>
+              <div className="form-group">
                 <label className="form-label">Condition</label>
                 <select className="form-select" value={condition} onChange={e => setCondition(e.target.value)}>
                   {['Near Mint','Lightly Played','Moderately Played','Heavily Played','Damaged'].map(c => <option key={c}>{c}</option>)}
@@ -258,17 +265,18 @@ function SoldModal({ listing, onClose, onSaved }) {
       if (err) throw err
       // Only decrement inventory quantities when marking sold for the first time
       if (!isEdit) {
+        const listingQty = listing.quantity ?? 1
         if (listing.card_id) {
           const { data: cardRow } = await supabase.from('cards').select('quantity_owned, quantity_listed').eq('id', listing.card_id).single()
           if (cardRow) await supabase.from('cards').update({
-            quantity_listed: Math.max(0, (cardRow.quantity_listed ?? 0) - 1),
-            quantity_owned:  Math.max(0, (cardRow.quantity_owned  ?? 0) - 1),
+            quantity_listed: Math.max(0, (cardRow.quantity_listed ?? 0) - listingQty),
+            quantity_owned:  Math.max(0, (cardRow.quantity_owned  ?? 0) - listingQty),
           }).eq('id', listing.card_id)
         } else {
           // Lot listing — decrement each card via ebay_listing_cards
           const { data: lotCards } = await supabase.from('ebay_listing_cards').select('card_id, quantity').eq('listing_id', listing.id)
           for (const lc of (lotCards ?? [])) {
-            const qty = lc.quantity ?? 1
+            const qty = (lc.quantity ?? 1) * listingQty
             const { data: cardRow } = await supabase.from('cards').select('quantity_owned, quantity_listed').eq('id', lc.card_id).single()
             if (cardRow) await supabase.from('cards').update({
               quantity_listed: Math.max(0, (cardRow.quantity_listed ?? 0) - qty),
@@ -342,31 +350,36 @@ function EditModal({ listing, cards, onClose, onSaved }) {
   const [price, setPrice]           = useState(String(listing.listed_price))
   const [shipping, setShipping]     = useState(String(listing.shipping_cost))
   const [condition, setCondition]   = useState(listing.condition)
+  const [quantity, setQuantity]     = useState(listing.quantity ?? 1)
   const [ebayUrl, setEbayUrl]       = useState(listing.ebay_url || '')
   const [notes, setNotes]           = useState(listing.notes || '')
   const [saving, setSaving]         = useState(false)
   const [error, setError]           = useState('')
   const [cardSearch, setCardSearch] = useState('')
   const [linkedCards, setLinkedCards] = useState([])
+  const [initialLinkedCards, setInitialLinkedCards] = useState([])
   const [loadingCards, setLoadingCards] = useState(true)
 
   // Load existing linked cards
   useEffect(() => {
     async function loadLinked() {
       setLoadingCards(true)
+      let initial = []
       // Check ebay_listing_cards junction table
       const { data: junctionRows } = await supabase
         .from('ebay_listing_cards')
         .select('card_id, quantity, cards(id, name, rarity, foil, set_name)')
         .eq('listing_id', listing.id)
       if (junctionRows?.length) {
-        setLinkedCards(junctionRows.map(r => ({ ...r.cards, qty: r.quantity ?? 1 })).filter(Boolean))
+        initial = junctionRows.map(r => ({ ...r.cards, qty: r.quantity ?? 1 })).filter(Boolean)
       } else if (listing.card_id) {
         const { data: card } = await supabase
           .from('cards').select('id, name, rarity, foil, set_name')
           .eq('id', listing.card_id).single()
-        if (card) setLinkedCards([{ ...card, qty: 1 }])
+        if (card) initial = [{ ...card, qty: 1 }]
       }
+      setLinkedCards(initial)
+      setInitialLinkedCards(initial)
       setLoadingCards(false)
     }
     loadLinked()
@@ -410,6 +423,7 @@ function EditModal({ listing, cards, onClose, onSaved }) {
         listed_price:  p,
         shipping_cost: s,
         condition,
+        quantity:      Math.max(1, parseInt(quantity) || 1),
         ebay_url:      ebayUrl.trim() || null,
         notes:         notes.trim() || null,
         // Set card_id to first linked card if only one, null if multiple
@@ -425,6 +439,23 @@ function EditModal({ listing, cards, onClose, onSaved }) {
         await supabase.from('ebay_listing_cards').insert(
           linkedCards.map(c => ({ listing_id: listing.id, card_id: c.id, price: perCardPrice, quantity: c.qty ?? 1 }))
         )
+      }
+
+      // Adjust quantity_listed: old contribution → new contribution per card
+      const oldListingQty = listing.quantity ?? 1
+      const newListingQty = Math.max(1, parseInt(quantity) || 1)
+      const oldContrib = {}
+      for (const c of initialLinkedCards) oldContrib[c.id] = (oldContrib[c.id] ?? 0) + (c.qty ?? 1) * oldListingQty
+      const newContrib = {}
+      for (const c of linkedCards)        newContrib[c.id] = (newContrib[c.id] ?? 0) + (c.qty ?? 1) * newListingQty
+      const affectedIds = new Set([...Object.keys(oldContrib), ...Object.keys(newContrib)])
+      for (const cardId of affectedIds) {
+        const delta = (newContrib[cardId] ?? 0) - (oldContrib[cardId] ?? 0)
+        if (delta === 0) continue
+        const { data: cardRow } = await supabase.from('cards').select('quantity_listed').eq('id', cardId).single()
+        if (cardRow) await supabase.from('cards').update({
+          quantity_listed: Math.max(0, (cardRow.quantity_listed ?? 0) + delta)
+        }).eq('id', cardId)
       }
 
       onSaved()
@@ -453,11 +484,17 @@ function EditModal({ listing, cards, onClose, onSaved }) {
               <input className="form-input" type="number" min="0" step="0.01" value={shipping} onChange={e => setShipping(e.target.value)} />
             </div>
           </div>
-          <div className="form-group">
-            <label className="form-label">Condition</label>
-            <select className="form-select" value={condition} onChange={e => setCondition(e.target.value)}>
-              {['Near Mint','Lightly Played','Moderately Played','Heavily Played','Damaged'].map(c => <option key={c}>{c}</option>)}
-            </select>
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label">Condition</label>
+              <select className="form-select" value={condition} onChange={e => setCondition(e.target.value)}>
+                {['Near Mint','Lightly Played','Moderately Played','Heavily Played','Damaged'].map(c => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+            <div className="form-group" style={{ maxWidth: 100 }}>
+              <label className="form-label">Qty listed</label>
+              <input className="form-input" type="number" min="1" step="1" value={quantity} onChange={e => setQuantity(e.target.value)} style={{ textAlign: 'center' }} />
+            </div>
           </div>
           {p > 0 && (
             <div style={{ display: 'flex', gap: 20, fontSize: 12, color: 'var(--text-muted)', marginBottom: 16 }}>
@@ -549,17 +586,18 @@ function EndModal({ listing, onClose, onSaved }) {
   const [saving, setSaving] = useState(false)
   async function handleEnd() {
     setSaving(true)
+    const listingQty = listing.quantity ?? 1
 
     if (listing.card_id) {
       const { data: cardRow } = await supabase.from('cards').select('quantity_listed').eq('id', listing.card_id).single()
       if (cardRow) await supabase.from('cards').update({
-        quantity_listed: Math.max(0, (cardRow.quantity_listed ?? 0) - 1),
+        quantity_listed: Math.max(0, (cardRow.quantity_listed ?? 0) - listingQty),
       }).eq('id', listing.card_id)
     } else {
       // Lot listing — decrement each card via ebay_listing_cards
       const { data: lotCards } = await supabase.from('ebay_listing_cards').select('card_id, quantity').eq('listing_id', listing.id)
       for (const lc of (lotCards ?? [])) {
-        const qty = lc.quantity ?? 1
+        const qty = (lc.quantity ?? 1) * listingQty
         const { data: cardRow } = await supabase.from('cards').select('quantity_listed').eq('id', lc.card_id).single()
         if (cardRow) await supabase.from('cards').update({
           quantity_listed: Math.max(0, (cardRow.quantity_listed ?? 0) - qty),
@@ -726,15 +764,16 @@ function DeleteSoldModal({ listing, onClose, onSaved }) {
   const [saving, setSaving] = useState(false)
   async function handleDelete() {
     setSaving(true)
+    const listingQty = listing.quantity ?? 1
     // Restore quantity_owned to inventory (card is back in stock)
     if (listing.card_id) {
       const { data: cardRow } = await supabase.from('cards').select('quantity_owned').eq('id', listing.card_id).single()
-      if (cardRow) await supabase.from('cards').update({ quantity_owned: (cardRow.quantity_owned ?? 0) + 1 }).eq('id', listing.card_id)
+      if (cardRow) await supabase.from('cards').update({ quantity_owned: (cardRow.quantity_owned ?? 0) + listingQty }).eq('id', listing.card_id)
     } else {
       // Lot listing — restore each card via ebay_listing_cards
       const { data: lotCards } = await supabase.from('ebay_listing_cards').select('card_id, quantity').eq('listing_id', listing.id)
       for (const lc of (lotCards ?? [])) {
-        const qty = lc.quantity ?? 1
+        const qty = (lc.quantity ?? 1) * listingQty
         const { data: cardRow } = await supabase.from('cards').select('quantity_owned').eq('id', lc.card_id).single()
         if (cardRow) await supabase.from('cards').update({ quantity_owned: (cardRow.quantity_owned ?? 0) + qty }).eq('id', lc.card_id)
       }
@@ -982,6 +1021,7 @@ export default function EbayListings() {
                   <thead><tr>
                     <th onClick={() => toggleSort('title')} style={{ cursor: 'pointer' }}>Card <SortIcon col="title" /></th>
                     <th>Cards in lot</th>
+                    <th onClick={() => toggleSort('quantity')} style={{ cursor: 'pointer', textAlign: 'right' }}>Qty <SortIcon col="quantity" /></th>
                     <th onClick={() => toggleSort('listed_price')} style={{ cursor: 'pointer', textAlign: 'right' }}>Price <SortIcon col="listed_price" /></th>
                     <th onClick={() => toggleSort('shipping_cost')} style={{ cursor: 'pointer', textAlign: 'right' }}>Shipping <SortIcon col="shipping_cost" /></th>
                     <th style={{ textAlign: 'right' }}>eBay fee</th>
@@ -1013,6 +1053,9 @@ export default function EbayListings() {
                           return <span style={{ color: 'var(--text-muted)' }}>—</span>
                         })()}
                       </td>
+                      <td className="text-right" style={{ fontWeight: (l.quantity ?? 1) > 1 ? 600 : 400, color: (l.quantity ?? 1) > 1 ? 'var(--text-primary)' : 'var(--text-muted)', fontSize: 13 }}>
+                        {l.quantity ?? 1}
+                      </td>
                       <td className="text-right text-gold">{usd(l.listed_price)}</td>
                       <td className="text-right text-muted">{usd(l.shipping_cost)}</td>
                       <td className="text-right text-muted">{usd(l.ebay_fee)}</td>
@@ -1037,6 +1080,7 @@ export default function EbayListings() {
                   <thead><tr>
                     <th onClick={() => toggleSort('title')} style={{ cursor: 'pointer' }}>Card <SortIcon col="title" /></th>
                     <th>Cards in lot</th>
+                    <th style={{ textAlign: 'right' }}>Qty</th>
                     <th onClick={() => toggleSort('sold_price')} style={{ cursor: 'pointer', textAlign: 'right' }}>Sold for <SortIcon col="sold_price" /></th>
                     <th style={{ textAlign: 'right' }}>Shipping</th>
                     <th style={{ textAlign: 'right' }}>eBay fee</th>
@@ -1065,6 +1109,7 @@ export default function EbayListings() {
                           return <span style={{ color: 'var(--text-muted)' }}>—</span>
                         })()}
                       </td>
+                      <td className="text-right text-muted" style={{ fontSize: 13 }}>{l.quantity ?? 1}</td>
                       <td className="text-right text-gold">{usd(l.sold_price)}</td>
                       <td className="text-right text-muted">{usd(l.sold_shipping)}</td>
                       <td className="text-right text-muted">{usd(l.sold_ebay_fee)}</td>

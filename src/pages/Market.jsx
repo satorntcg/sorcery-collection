@@ -246,7 +246,7 @@ export default function Market() {
             <div className="alert-desc">
               {runResult.error
                 ? runResult.error
-                : `${runResult.success ?? 0} cards updated · ${runResult.failed ?? 0} failed · ${runResult.alerts ?? 0} alerts created`}
+                : `${runResult.updated ?? 0} cards updated · ${runResult.failed ?? 0} failed · ${runResult.alerts ?? 0} alerts created · ${runResult.remaining ?? 0} remaining`}
             </div>
           </div>
         </div>

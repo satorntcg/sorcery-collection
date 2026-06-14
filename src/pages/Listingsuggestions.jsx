@@ -389,13 +389,21 @@ export default function ListingSuggestions() {
                     {/* Cards */}
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                       {group.cards.map((card, j) => (
-                        <div key={j} style={{
-                          fontSize: 11, padding: '3px 8px',
-                          background: 'var(--bg-raised)',
-                          border: '1px solid var(--border)',
-                          borderRadius: 4,
-                          color: card.foil ? 'var(--gold-light)' : 'var(--text-secondary)',
-                        }}>
+                        <div
+                          key={j}
+                          title="Open market check"
+                          onClick={() => window.open(`/market?card=${card.id}`, '_blank')}
+                          style={{
+                            fontSize: 11, padding: '3px 8px',
+                            background: 'var(--bg-raised)',
+                            border: '1px solid var(--border)',
+                            borderRadius: 4,
+                            color: card.foil ? 'var(--gold-light)' : 'var(--text-secondary)',
+                            cursor: 'pointer',
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--gold)'; e.currentTarget.style.color = 'var(--gold)' }}
+                          onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = card.foil ? 'var(--gold-light)' : 'var(--text-secondary)' }}
+                        >
                           {card.name}{card.foil ? ' ✦' : ''}{card.is_site ? ' ⬡' : ''} · {usd(card.tcgplayer_market)}
                         </div>
                       ))}

@@ -1,5 +1,5 @@
 // ============================================================
-// Edge Function: daily_price_check v17
+// Edge Function: daily_price_check v18
 // eBay prices ONLY — TCGPlayer handled by Google Apps Script
 // Processes BATCH_SIZE cards per run, skips cards already
 // checked today. Only processes cards that have a TCGplayer
@@ -20,7 +20,7 @@ const ALERT_THRESHOLD  = parseFloat(Deno.env.get("ALERT_PCT_THRESHOLD") ?? "15")
 const RESEND_API_KEY   = Deno.env.get("RESEND_API_KEY")!;
 const ALERT_EMAIL_TO   = Deno.env.get("ALERT_EMAIL_TO") ?? "satorntcg@gmail.com";
 const ALERT_EMAIL_FROM = "Sorcery TCG Manager <alerts@satorntcg.com>";
-const BATCH_SIZE       = parseInt(Deno.env.get("BATCH_SIZE") ?? "100");
+const BATCH_SIZE       = parseInt(Deno.env.get("BATCH_SIZE") ?? "25");
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin":  "*",
@@ -89,10 +89,18 @@ async function fetchEbayPrices(
       "paginationInput.entriesPerPage": "50",
     });
     const url = `https://svcs.ebay.com/services/search/FindingService/v1?${params}`;
-    const res = await fetch(url, {
-      headers: { "X-EBAY-SOA-SECURITY-APPNAME": EBAY_APP_ID },
-    });
-    if (!res.ok) return [];
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), 3000);
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        headers: { "X-EBAY-SOA-SECURITY-APPNAME": EBAY_APP_ID },
+        signal: abort.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!res!.ok) return [];
     const json = await res.json();
     const items: Record<string, unknown>[] =
       json?.findCompletedItemsResponse?.[0]?.searchResult?.[0]?.item ?? [];
@@ -256,7 +264,7 @@ async function sendStatusEmail(
   </div>`}
 
   <div style="border-top:1px solid rgba(201,168,76,0.15);padding-top:16px;">
-    <p style="font-size:12px;color:#5A5448;margin:0;">eBay sold prices (completed listings) · TCGPlayer via Google Apps Script · Alert threshold: ≥${ALERT_THRESHOLD}% · Foil-aware search v17</p>
+    <p style="font-size:12px;color:#5A5448;margin:0;">eBay sold prices (completed listings) · TCGPlayer via Google Apps Script · Alert threshold: ≥${ALERT_THRESHOLD}% · Foil-aware search v18</p>
   </div>
 </div></body></html>`;
 
@@ -340,7 +348,7 @@ Deno.serve(async (req) => {
     return new Response("Method not allowed", { status: 405 });
   }
 
-  console.log(`Starting eBay price check v17 — batch size: ${BATCH_SIZE} — ${new Date().toISOString()}`);
+  console.log(`Starting eBay price check v18 — batch size: ${BATCH_SIZE} — ${new Date().toISOString()}`);
 
   try {
     const todayStart = new Date();
@@ -351,7 +359,8 @@ Deno.serve(async (req) => {
     const { data: todaySnaps } = await supabase
       .from("price_snapshots")
       .select("card_id, ebay_sold_avg")
-      .gte("checked_at", todayStart.toISOString());
+      .gte("checked_at", todayStart.toISOString())
+      .limit(50000);
 
     const hasSnapshotToday = new Set((todaySnaps ?? []).map(s => s.card_id));
     const alreadyHasEbay   = new Set(
@@ -364,7 +373,8 @@ Deno.serve(async (req) => {
     const { data: allCards, error: cardsError } = await supabase
       .from("cards")
       .select("id, name, set_name, foil, tcgplayer_id")
-      .order("name");
+      .order("name")
+      .limit(10000);
 
     if (cardsError) throw cardsError;
 
@@ -414,18 +424,25 @@ Deno.serve(async (req) => {
     console.log("eBay token OK");
 
     // ── 5. Process batch ──
-    const results  = { updated: 0, created: 0, failed: 0, skipped: 0, alerts: 0 };
+    const results   = { updated: 0, created: 0, failed: 0, skipped: 0, alerts: 0 };
     const pendingEmailAlerts: AlertRecord[] = [];
-    let lastCard   = '';
+    let lastCard    = '';
+    const startTime = Date.now();
+    const DEADLINE  = 110_000; // stop at 110s to leave time for email before 150s timeout
 
-    for (const card of batch as Card[]) {
-      lastCard = `${card.name}${card.foil ? ' (Foil)' : ''}`;
-      console.log(`Processing: ${lastCard}`);
-      try {
-        await new Promise(r => setTimeout(r, 300));
+    const CHUNK_SIZE = 5;
+    for (let i = 0; i < batch.length; i += CHUNK_SIZE) {
+      if (Date.now() - startTime > DEADLINE) {
+        console.log(`Time budget reached — stopping early (${results.updated} updated so far)`);
+        break;
+      }
+      const chunk = (batch as Card[]).slice(i, i + CHUNK_SIZE);
+      console.log(`Chunk ${Math.floor(i / CHUNK_SIZE) + 1}: processing ${chunk.map(c => c.name).join(', ')}`);
 
+      const chunkResults = await Promise.allSettled(chunk.map(async (card) => {
+        const cardLabel = `${card.name}${card.foil ? ' (Foil)' : ''}`;
         const ebay = await fetchEbayPrices(card.name, card.foil ?? false, ebayToken);
-        console.log(`  eBay: avg=$${ebay.avg} count=${ebay.count}`);
+        console.log(`  eBay: ${cardLabel} avg=$${ebay.avg} count=${ebay.count}`);
 
         const { data: existingSnap } = await supabase
           .from("price_snapshots")
@@ -434,40 +451,43 @@ Deno.serve(async (req) => {
           .gte("checked_at", todayStart.toISOString())
           .maybeSingle();
 
-        if (existingSnap) {
-          const { error } = await supabase
-            .from("price_snapshots")
-            .update({
-              ebay_sold_avg:   ebay.avg ?? 0,
-              ebay_sold_low:   ebay.low,
-              ebay_sold_high:  ebay.high,
-              ebay_sold_count: ebay.count,
-            })
-            .eq("id", existingSnap.id);
-
-          if (error) {
-            console.error(`  Snapshot update failed: ${error.message}`);
-            results.failed++;
-            continue;
-          }
-
-          await checkAndCreateAlerts(
-            card.id, card.name,
-            prevMap.get(card.id) ?? null,
-            existingSnap.tcgplayer_market,
-            ALERT_THRESHOLD,
-            pendingEmailAlerts
-          );
-
-          results.updated++;
-          console.log(`  ✓ updated snapshot`);
-        } else {
-          console.log(`  → no snapshot found for ${card.name} — skipping`);
-          results.skipped++;
+        if (!existingSnap) {
+          console.log(`  → no snapshot for ${card.name}`);
+          return 'skipped' as const;
         }
-      } catch (err) {
-        console.error(`  FAILED: ${card.name} — ${String(err)}`);
-        results.failed++;
+
+        const { error } = await supabase
+          .from("price_snapshots")
+          .update({
+            ebay_sold_avg:   ebay.avg ?? 0,
+            ebay_sold_low:   ebay.low,
+            ebay_sold_high:  ebay.high,
+            ebay_sold_count: ebay.count,
+          })
+          .eq("id", existingSnap.id);
+
+        if (error) throw new Error(`Snapshot update failed for ${card.name}: ${error.message}`);
+
+        await checkAndCreateAlerts(
+          card.id, card.name,
+          prevMap.get(card.id) ?? null,
+          existingSnap.tcgplayer_market,
+          ALERT_THRESHOLD,
+          pendingEmailAlerts
+        );
+
+        console.log(`  ✓ ${cardLabel}`);
+        return cardLabel;
+      }));
+
+      for (const r of chunkResults) {
+        if (r.status === 'fulfilled') {
+          if (r.value === 'skipped') { results.skipped++; }
+          else { results.updated++; lastCard = r.value; }
+        } else {
+          console.error(`  FAILED: ${String(r.reason)}`);
+          results.failed++;
+        }
       }
     }
 
