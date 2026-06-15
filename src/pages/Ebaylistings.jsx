@@ -17,6 +17,7 @@ function CreateModal({ cards, onClose, onSaved }) {
   const [step, setStep]               = useState(1)
   const [search, setSearch]           = useState('')
   const [selectedIds, setSelectedIds] = useState([])
+  const [cardQtys, setCardQtys]       = useState({}) // cardId -> qty per lot
   const [prices, setPrices]           = useState({})
   const [title, setTitle]             = useState('')
   const [shipping, setShipping]       = useState('4.00')
@@ -35,7 +36,24 @@ function CreateModal({ cards, onClose, onSaved }) {
   })
 
   function toggleCard(id) {
-    setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+    setSelectedIds(prev => {
+      if (prev.includes(id)) {
+        setCardQtys(q => { const next = { ...q }; delete next[id]; return next })
+        return prev.filter(x => x !== id)
+      } else {
+        setCardQtys(q => ({ ...q, [id]: q[id] ?? 1 }))
+        return [...prev, id]
+      }
+    })
+  }
+
+  function adjustCardQty(id, delta) {
+    setCardQtys(q => ({ ...q, [id]: Math.max(1, (q[id] ?? 1) + delta) }))
+  }
+
+  function clearAll() {
+    setSelectedIds([])
+    setCardQtys({})
   }
 
   function goToStep2() {
@@ -43,42 +61,60 @@ function CreateModal({ cards, onClose, onSaved }) {
     const initial = {}
     selectedCards.forEach(c => { initial[c.card_id] = c.tcg_market_price ? Number(c.tcg_market_price).toFixed(2) : '' })
     setPrices(initial)
-    setTitle(selectedIds.length === 1
+    const totalQtyInLot = selectedIds.reduce((s, id) => s + (cardQtys[id] ?? 1), 0)
+    const isSingle = selectedIds.length === 1 && (cardQtys[selectedIds[0]] ?? 1) === 1
+    setTitle(isSingle
       ? `${selectedCards[0].name}${selectedCards[0].foil ? ' (Foil)' : ''} — Sorcery TCG${selectedCards[0].set_name ? ` ${selectedCards[0].set_name}` : ''} — ${condition}`
-      : `Sorcery TCG Lot — ${selectedIds.length} Cards`)
+      : `Sorcery TCG Lot — ${totalQtyInLot} Cards`)
     setStep(2)
   }
 
-  const totalPrice     = selectedCards.reduce((s, c) => s + (parseFloat(prices[c.card_id]) || 0), 0)
+  const totalPrice     = selectedCards.reduce((s, c) => s + (parseFloat(prices[c.card_id]) || 0) * (cardQtys[c.card_id] ?? 1), 0)
   const s              = parseFloat(shipping) || 0
   const fee            = calcFee(totalPrice)
   const net            = calcNet(totalPrice, s, fee)
-  const totalCostBasis = selectedCards.reduce((s, c) => s + (c.cost_basis || 0), 0)
+  const totalCostBasis = selectedCards.reduce((s, c) => s + (c.cost_basis || 0) * (cardQtys[c.card_id] ?? 1), 0)
   const estProfit      = totalPrice > 0 ? net - totalCostBasis : null
+  const totalQtyInLot  = selectedIds.reduce((s, id) => s + (cardQtys[id] ?? 1), 0)
 
   async function handleSave() {
     if (!title.trim()) { setError('Title is required.'); return }
     if (totalPrice <= 0) { setError('At least one card needs a price.'); return }
     setSaving(true); setError('')
     const listingQty = Math.max(1, parseInt(quantity) || 1)
+    const isSingleCard = selectedIds.length === 1 && (cardQtys[selectedIds[0]] ?? 1) === 1
     try {
-      const cardBreakdown = selectedCards.map(c => ({ name: c.name, price: parseFloat(prices[c.card_id]) || 0 }))
-      const { error: err } = await supabase.from('ebay_listings').insert({
-        card_id:       selectedIds.length === 1 ? selectedIds[0] : null,
+      const { data: listing, error: err } = await supabase.from('ebay_listings').insert({
+        card_id:       isSingleCard ? selectedIds[0] : null,
         title:         title.trim(),
         listed_price:  parseFloat(totalPrice.toFixed(2)),
         shipping_cost: s,
         condition,
         quantity:      listingQty,
-        notes: [notes.trim(), selectedIds.length > 1 ? `Cards: ${cardBreakdown.map(c => `${c.name} ($${c.price.toFixed(2)})`).join(', ')}` : null].filter(Boolean).join('\n') || null,
-        ebay_url: ebayUrl.trim() || null,
-        cost_basis: totalCostBasis > 0 ? parseFloat(totalCostBasis.toFixed(4)) : null,
-        status: 'active',
-      })
+        notes:         notes.trim() || null,
+        ebay_url:      ebayUrl.trim() || null,
+        cost_basis:    totalCostBasis > 0 ? parseFloat(totalCostBasis.toFixed(4)) : null,
+        status:        'active',
+      }).select('id').single()
       if (err) throw err
+
+      // Link cards via junction table (same as EditModal)
+      if (listing && selectedCards.length > 0) {
+        await supabase.from('ebay_listing_cards').insert(
+          selectedCards.map(c => ({
+            listing_id: listing.id,
+            card_id:    c.card_id,
+            price:      parseFloat(prices[c.card_id]) || 0,
+            quantity:   cardQtys[c.card_id] ?? 1,
+          }))
+        )
+      }
+
+      // Increment quantity_listed: cardQty * listingQty per card
       for (const c of selectedCards) {
+        const cardQty = (cardQtys[c.card_id] ?? 1) * listingQty
         const { data: cardRow } = await supabase.from('cards').select('quantity_listed').eq('id', c.card_id).single()
-        if (cardRow) await supabase.from('cards').update({ quantity_listed: (cardRow.quantity_listed ?? 0) + listingQty }).eq('id', c.card_id)
+        if (cardRow) await supabase.from('cards').update({ quantity_listed: (cardRow.quantity_listed ?? 0) + cardQty }).eq('id', c.card_id)
       }
       onSaved()
     } catch (e) { setError(e.message) } finally { setSaving(false) }
@@ -86,7 +122,7 @@ function CreateModal({ cards, onClose, onSaved }) {
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" style={{ maxWidth: step === 2 ? 620 : 520 }} onClick={e => e.stopPropagation()}>
+      <div className="modal" style={{ maxWidth: step === 2 ? 660 : 520 }} onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <span className="modal-title">{step === 1 ? 'Select cards' : 'Price & listing details'}</span>
           <button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>
@@ -101,9 +137,9 @@ function CreateModal({ cards, onClose, onSaved }) {
             {selectedIds.length > 0 && (
               <div className="alert-item success mb-16" style={{ padding: '8px 14px' }}>
                 <span className="alert-content" style={{ fontSize: 12 }}>
-                  {selectedIds.length} card{selectedIds.length !== 1 ? 's' : ''} selected
+                  {totalQtyInLot} card{totalQtyInLot !== 1 ? 's' : ''} selected ({selectedIds.length} unique)
                 </span>
-                <button className="btn btn-ghost btn-sm" onClick={() => setSelectedIds([])}>Clear</button>
+                <button className="btn btn-ghost btn-sm" onClick={clearAll}>Clear</button>
               </div>
             )}
 
@@ -112,6 +148,7 @@ function CreateModal({ cards, onClose, onSaved }) {
                 <div className="empty-state" style={{ padding: '24px' }}>No cards found</div>
               ) : filtered.map(c => {
                 const isSel = selectedIds.includes(c.card_id)
+                const qty   = cardQtys[c.card_id] ?? 1
                 return (
                   <div key={c.card_id} onClick={() => toggleCard(c.card_id)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderBottom: '1px solid var(--border)', cursor: 'pointer', background: isSel ? 'rgba(201,168,76,0.06)' : 'transparent', borderLeft: isSel ? '2px solid var(--gold)' : '2px solid transparent' }}>
                     <input type="checkbox" checked={isSel} onChange={() => toggleCard(c.card_id)} onClick={e => e.stopPropagation()} />
@@ -119,6 +156,13 @@ function CreateModal({ cards, onClose, onSaved }) {
                       <div className="name-cell" style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name}{c.foil ? ' ✦' : ''}</div>
                       <div className="set-cell">{c.rarity}{c.set_name ? ` · ${c.set_name}` : ''}</div>
                     </div>
+                    {isSel && (
+                      <div onClick={e => e.stopPropagation()} style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+                        <button className="btn btn-ghost btn-sm" onClick={() => adjustCardQty(c.card_id, -1)} style={{ padding: '2px 7px', minWidth: 0 }}>−</button>
+                        <span style={{ fontSize: 13, fontWeight: 600, minWidth: 18, textAlign: 'center' }}>{qty}</span>
+                        <button className="btn btn-ghost btn-sm" onClick={() => adjustCardQty(c.card_id, +1)} style={{ padding: '2px 7px', minWidth: 0 }}>+</button>
+                      </div>
+                    )}
                     <div style={{ textAlign: 'right', flexShrink: 0 }}>
                       {c.tcg_market_price ? <span className="text-gold" style={{ fontSize: 13, fontWeight: 500 }}>{usd(c.tcg_market_price)}</span> : <span className="text-muted" style={{ fontSize: 12 }}>No price</span>}
                       {c.cost_basis && <div className="set-cell">cost {usd(c.cost_basis)}</div>}
@@ -147,27 +191,41 @@ function CreateModal({ cards, onClose, onSaved }) {
                 <thead>
                   <tr>
                     <th>Card</th>
+                    <th className="text-right">Qty</th>
                     <th className="text-right">TCG price</th>
-                    <th className="text-right">List price ($)</th>
+                    <th className="text-right">Unit price ($)</th>
+                    <th className="text-right">Subtotal</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {selectedCards.map(c => (
-                    <tr key={c.card_id}>
-                      <td>
-                        <div className="name-cell">{c.name}{c.foil ? ' ✦' : ''}</div>
-                        <div className="set-cell">{c.rarity}{c.set_name ? ` · ${c.set_name}` : ''}{c.cost_basis ? ` · cost ${usd(c.cost_basis)}` : ''}</div>
-                      </td>
-                      <td className="text-right text-muted">{usd(c.tcg_market_price)}</td>
-                      <td className="text-right" style={{ width: 110 }}>
-                        <input className="form-input" type="number" min="0" step="0.01" value={prices[c.card_id] ?? ''} onChange={e => setPrices(prev => ({ ...prev, [c.card_id]: e.target.value }))} placeholder="0.00" style={{ textAlign: 'right', padding: '5px 8px' }} />
-                      </td>
-                    </tr>
-                  ))}
+                  {selectedCards.map(c => {
+                    const qty      = cardQtys[c.card_id] ?? 1
+                    const unitPrice = parseFloat(prices[c.card_id]) || 0
+                    return (
+                      <tr key={c.card_id}>
+                        <td>
+                          <div className="name-cell">{c.name}{c.foil ? ' ✦' : ''}</div>
+                          <div className="set-cell">{c.rarity}{c.set_name ? ` · ${c.set_name}` : ''}{c.cost_basis ? ` · cost ${usd(c.cost_basis * qty)}` : ''}</div>
+                        </td>
+                        <td className="text-right">
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4 }}>
+                            <button className="btn btn-ghost btn-sm" onClick={() => adjustCardQty(c.card_id, -1)} style={{ padding: '2px 7px', minWidth: 0 }}>−</button>
+                            <span style={{ fontSize: 13, fontWeight: 600, minWidth: 18, textAlign: 'center' }}>{qty}</span>
+                            <button className="btn btn-ghost btn-sm" onClick={() => adjustCardQty(c.card_id, +1)} style={{ padding: '2px 7px', minWidth: 0 }}>+</button>
+                          </div>
+                        </td>
+                        <td className="text-right text-muted">{usd(c.tcg_market_price)}</td>
+                        <td className="text-right" style={{ width: 110 }}>
+                          <input className="form-input" type="number" min="0" step="0.01" value={prices[c.card_id] ?? ''} onChange={e => setPrices(prev => ({ ...prev, [c.card_id]: e.target.value }))} placeholder="0.00" style={{ textAlign: 'right', padding: '5px 8px' }} />
+                        </td>
+                        <td className="text-right text-gold" style={{ fontSize: 13 }}>{unitPrice > 0 ? usd(unitPrice * qty) : '—'}</td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
                 <tfoot>
                   <tr>
-                    <td colSpan={2} style={{ padding: '10px 14px', fontSize: 11, color: 'var(--text-muted)', borderTop: '1px solid var(--border)' }}>Total listing price</td>
+                    <td colSpan={4} style={{ padding: '10px 14px', fontSize: 11, color: 'var(--text-muted)', borderTop: '1px solid var(--border)' }}>Total listing price ({totalQtyInLot} cards)</td>
                     <td className="text-right text-gold" style={{ padding: '10px 14px', fontWeight: 500, borderTop: '1px solid var(--border)' }}>{usd(totalPrice)}</td>
                   </tr>
                 </tfoot>
@@ -220,7 +278,7 @@ function CreateModal({ cards, onClose, onSaved }) {
             <div className="modal-footer" style={{ padding: '16px 0 0', border: 'none' }}>
               <button className="btn" onClick={onClose}>Cancel</button>
               <button className="btn btn-primary" onClick={handleSave} disabled={saving || totalPrice <= 0}>
-                {saving ? 'Saving…' : `Save listing${selectedIds.length > 1 ? ` (${selectedIds.length} cards)` : ''}`}
+                {saving ? 'Saving…' : `Save listing (${totalQtyInLot} card${totalQtyInLot !== 1 ? 's' : ''})`}
               </button>
             </div>
           </div>
