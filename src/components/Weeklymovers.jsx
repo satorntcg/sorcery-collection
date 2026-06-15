@@ -10,8 +10,9 @@ const slugify = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-
 function weekRange() {
   const end   = new Date()
   const start = new Date(end); start.setDate(end.getDate() - 7)
-  const fmt   = d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-  return `${fmt(start)} – ${fmt(end)}`
+  const fmt    = d => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+  const year   = end.getFullYear()
+  return `${fmt(start)} – ${fmt(end)}, ${year}`
 }
 
 export default function WeeklyMovers({ publicLinks = false, onSelect }) {
@@ -45,8 +46,9 @@ export default function WeeklyMovers({ publicLinks = false, onSelect }) {
     .filter(m => foilFilter === 'foil' ? m.foil : !m.foil)
     .filter(m => setFilter ? m.set_name === setFilter : true)
 
-  const gainers = filtered.filter(g => g.pct_change > 0).slice(0, 10)
-  const losers  = filtered.filter(g => g.pct_change < 0).slice(0, 10)
+  const dollarChange = (g) => Number(g.current_price) - Number(g.price_7d_ago)
+  const gainers = filtered.filter(g => g.pct_change > 0).sort((a, b) => dollarChange(b) - dollarChange(a)).slice(0, 5)
+  const losers  = filtered.filter(g => g.pct_change < 0).sort((a, b) => dollarChange(a) - dollarChange(b)).slice(0, 5)
 
   if (!gainers.length && !losers.length && !movers.length) return null
 
@@ -97,19 +99,18 @@ export default function WeeklyMovers({ publicLinks = false, onSelect }) {
               </span>
             )}
           </div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+          <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)', marginTop: 2 }}>
             {usd(g.price_7d_ago)} → {usd(g.current_price)}
-            <span style={{ marginLeft: 6, color: positive ? 'var(--success)' : 'var(--danger)' }}>
-              ({fmtChg(change)})
-            </span>
           </div>
         </div>
         <span className={`badge badge-${g.rarity}`} style={{ fontSize: 10, justifySelf: 'center' }}>{g.rarity}</span>
-        <div style={{
-          fontSize: 16, fontWeight: 600, minWidth: 64, textAlign: 'right',
-          color: positive ? 'var(--success)' : 'var(--danger)',
-        }}>
-          {fmtPct(g.pct_change)}
+        <div style={{ textAlign: 'right', minWidth: 64 }}>
+          <div style={{ fontSize: 16, fontWeight: 600, color: positive ? 'var(--success)' : 'var(--danger)' }}>
+            {fmtChg(change)}
+          </div>
+          <div style={{ fontSize: 13, fontWeight: 500, color: positive ? 'var(--success)' : 'var(--danger)', opacity: 0.8, marginTop: 1 }}>
+            {fmtPct(g.pct_change)}
+          </div>
         </div>
       </div>
     )
@@ -119,7 +120,7 @@ export default function WeeklyMovers({ publicLinks = false, onSelect }) {
     <div ref={cardRef} className="panel" style={{ marginBottom: 24 }}>
       <div className="panel-header" style={{ borderBottom: '1px solid var(--border)' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span className="panel-title">Weekly Price Movers</span>
+          <span className="panel-title">Weekly Price Movers{setFilter ? ` · ${setFilter}` : ''} · {foilFilter === 'foil' ? 'Foil' : 'Non-Foil'}</span>
           <span
             title="Market Price reflects the rolling average of recent completed sales on TCGplayer, not current listing prices. Low-volume cards may lag behind actual sale activity."
             style={{ cursor: 'help', opacity: 0.5, fontSize: 11 }}

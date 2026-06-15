@@ -72,7 +72,6 @@ export default function CardDetail() {
         setSnapshots((snapData ?? []).map(s => ({
           date: new Date(s.checked_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
           'TCG Market': s.tcgplayer_market != null ? Number(s.tcgplayer_market) : null,
-          'TCG Low':    s.tcgplayer_low    != null ? Number(s.tcgplayer_low)    : null,
           'eBay Avg':   s.ebay_sold_avg    != null ? Number(s.ebay_sold_avg)    : null,
         })))
         document.title = `${data.name} · ${data.set_name} — SatornTCG`
@@ -245,7 +244,6 @@ export default function CardDetail() {
                   />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
                   <Line type="monotone" dataKey="TCG Market" stroke="var(--gold)" strokeWidth={2} dot={false} connectNulls />
-                  <Line type="monotone" dataKey="TCG Low"    stroke="var(--text-muted)" strokeWidth={1} dot={false} connectNulls strokeDasharray="4 2" />
                   <Line type="monotone" dataKey="eBay Avg"   stroke="#7eb8d4" strokeWidth={2} connectNulls
                     dot={(props) => {
                       const { cx, cy, value } = props
