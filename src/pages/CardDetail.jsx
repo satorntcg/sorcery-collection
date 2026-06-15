@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts'
 
-const usd = n => n == null ? '—' : `$${Number(n).toFixed(2)}`
+const usd = n => (n == null || Number(n) === 0) ? '—' : `$${Number(n).toFixed(2)}`
 
 const conditionLabel = raw => {
   if (!raw) return null
@@ -72,7 +72,7 @@ export default function CardDetail() {
         setSnapshots((snapData ?? []).map(s => ({
           date: new Date(s.checked_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
           'TCG Market': s.tcgplayer_market != null ? Number(s.tcgplayer_market) : null,
-          'eBay Avg':   s.ebay_sold_avg    != null ? Number(s.ebay_sold_avg)    : null,
+          'eBay Avg':   s.ebay_sold_avg ? Number(s.ebay_sold_avg) : null,
         })))
         document.title = `${data.name} · ${data.set_name} — SatornTCG`
       }
