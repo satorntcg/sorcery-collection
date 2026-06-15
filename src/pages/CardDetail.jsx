@@ -207,25 +207,27 @@ export default function CardDetail() {
                 )}
               </div>
             </div>
-            <div style={{ borderTop: '1px solid var(--border)', paddingTop: '16px' }}>
-              <div style={{ textTransform: 'uppercase', fontSize: '11px', letterSpacing: '0.08em', color: 'var(--text-muted)', marginBottom: '12px' }}>
-                eBay Sold
+            {latestEbay && (
+              <div style={{ borderTop: '1px solid var(--border)', paddingTop: '16px' }}>
+                <div style={{ textTransform: 'uppercase', fontSize: '11px', letterSpacing: '0.08em', color: 'var(--text-muted)', marginBottom: '12px' }}>
+                  eBay Sold
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
+                  <div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Avg</div>
+                    <div style={{ fontSize: '18px', fontWeight: 500, color: 'var(--text-primary)' }}>{usd(latestEbay.ebay_sold_avg)}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Low</div>
+                    <div style={{ fontSize: '18px', fontWeight: 500, color: 'var(--text-primary)' }}>{usd(latestEbay.ebay_sold_low)}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>High</div>
+                    <div style={{ fontSize: '18px', fontWeight: 500, color: 'var(--text-primary)' }}>{usd(latestEbay.ebay_sold_high)}</div>
+                  </div>
+                </div>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
-                <div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Avg</div>
-                  <div style={{ fontSize: '18px', fontWeight: 500, color: 'var(--text-primary)' }}>{usd(latestEbay?.ebay_sold_avg)}</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Low</div>
-                  <div style={{ fontSize: '18px', fontWeight: 500, color: 'var(--text-primary)' }}>{usd(latestEbay?.ebay_sold_low)}</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>High</div>
-                  <div style={{ fontSize: '18px', fontWeight: 500, color: 'var(--text-primary)' }}>{usd(latestEbay?.ebay_sold_high)}</div>
-                </div>
-              </div>
-            </div>
+            )}
           </div>
 
           {/* Price history chart */}
@@ -248,13 +250,15 @@ export default function CardDetail() {
                   />
                   <Legend wrapperStyle={{ fontSize: 11 }} />
                   <Line type="monotone" dataKey="TCG Market" stroke="var(--gold)" strokeWidth={2} dot={false} connectNulls />
-                  <Line type="monotone" dataKey="eBay Avg"   stroke="#7eb8d4" strokeWidth={2} connectNulls
-                    dot={(props) => {
-                      const { cx, cy, value } = props
-                      if (value == null) return null
-                      return <circle key={`ebay-dot-${cx}-${cy}`} cx={cx} cy={cy} r={3} fill="#7eb8d4" stroke="none" />
-                    }}
-                  />
+                  {latestEbay && (
+                    <Line type="monotone" dataKey="eBay Avg" stroke="#7eb8d4" strokeWidth={2} connectNulls
+                      dot={(props) => {
+                        const { cx, cy, value } = props
+                        if (value == null) return null
+                        return <circle key={`ebay-dot-${cx}-${cy}`} cx={cx} cy={cy} r={3} fill="#7eb8d4" stroke="none" />
+                      }}
+                    />
+                  )}
                 </LineChart>
               </ResponsiveContainer>
             )}
