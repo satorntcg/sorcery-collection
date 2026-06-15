@@ -19,6 +19,7 @@ export default function CardDetail() {
   const [card,         setCard]        = useState(null)
   const [ebayListing,  setEbayListing] = useState(null)
   const [snapshots,    setSnapshots]   = useState([])
+  const [latestEbay,   setLatestEbay]  = useState(null)
   const [priceChange,  setPriceChange] = useState(null)
   const [loading,      setLoading]     = useState(true)
   const [notFound,     setNotFound]    = useState(false)
@@ -45,7 +46,7 @@ export default function CardDetail() {
           .eq('card_id', id),
         supabase
           .from('price_snapshots')
-          .select('checked_at, tcgplayer_market, tcgplayer_low, ebay_sold_avg')
+          .select('checked_at, tcgplayer_market, tcgplayer_low, ebay_sold_avg, ebay_sold_low, ebay_sold_high')
           .eq('card_id', id)
           .order('checked_at', { ascending: true }),
         supabase.from('v_price_gainers_losers').select('current_price, price_7d_ago').eq('card_id', id).maybeSingle(),
@@ -69,11 +70,14 @@ export default function CardDetail() {
           const ch = Number(changeData.current_price) - Number(changeData.price_7d_ago)
           setPriceChange(Math.abs(ch) >= 0.05 ? ch : null)
         }
-        setSnapshots((snapData ?? []).map(s => ({
+        const snaps = snapData ?? []
+        setSnapshots(snaps.map(s => ({
           date: new Date(s.checked_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
           'TCG Market': s.tcgplayer_market != null ? Number(s.tcgplayer_market) : null,
           'eBay Avg':   s.ebay_sold_avg ? Number(s.ebay_sold_avg) : null,
         })))
+        const lastEbaySnap = [...snaps].reverse().find(s => s.ebay_sold_avg > 0)
+        setLatestEbay(lastEbaySnap ?? null)
         document.title = `${data.name} · ${data.set_name} — SatornTCG`
       }
       setLoading(false)
@@ -210,15 +214,15 @@ export default function CardDetail() {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '16px' }}>
                 <div>
                   <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Avg</div>
-                  <div style={{ fontSize: '18px', fontWeight: 500, color: 'var(--text-primary)' }}>{usd(card.ebay_sold_avg)}</div>
+                  <div style={{ fontSize: '18px', fontWeight: 500, color: 'var(--text-primary)' }}>{usd(latestEbay?.ebay_sold_avg)}</div>
                 </div>
                 <div>
                   <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>Low</div>
-                  <div style={{ fontSize: '18px', fontWeight: 500, color: 'var(--text-primary)' }}>{usd(card.ebay_sold_low)}</div>
+                  <div style={{ fontSize: '18px', fontWeight: 500, color: 'var(--text-primary)' }}>{usd(latestEbay?.ebay_sold_low)}</div>
                 </div>
                 <div>
                   <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px' }}>High</div>
-                  <div style={{ fontSize: '18px', fontWeight: 500, color: 'var(--text-primary)' }}>{usd(card.ebay_sold_high)}</div>
+                  <div style={{ fontSize: '18px', fontWeight: 500, color: 'var(--text-primary)' }}>{usd(latestEbay?.ebay_sold_high)}</div>
                 </div>
               </div>
             </div>
