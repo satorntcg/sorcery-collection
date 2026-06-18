@@ -110,7 +110,7 @@ async function fetchEbayPrices(
         const title = ((item.title as string[])?.[0] ?? '').toLowerCase();
         return foil ? title.includes('foil') : !title.includes('foil');
       });
-      return (foil && filtered.length < 3) ? list : filtered;
+      return filtered;
     };
 
     return titleFilter(items)
@@ -456,12 +456,13 @@ Deno.serve(async (req) => {
           return 'skipped' as const;
         }
 
+        const ebayValid = ebay.count >= 2;
         const { error } = await supabase
           .from("price_snapshots")
           .update({
-            ebay_sold_avg:   ebay.avg ?? 0,
-            ebay_sold_low:   ebay.low,
-            ebay_sold_high:  ebay.high,
+            ebay_sold_avg:   ebayValid ? (ebay.avg ?? 0) : null,
+            ebay_sold_low:   ebayValid ? ebay.low : null,
+            ebay_sold_high:  ebayValid ? ebay.high : null,
             ebay_sold_count: ebay.count,
           })
           .eq("id", existingSnap.id);

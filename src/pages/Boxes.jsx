@@ -611,11 +611,25 @@ export default function Boxes() {
               <div className="form-row" style={{ marginBottom: 16 }}>
                 <div className="form-group">
                   <label className="form-label">Pack *</label>
-                  <select className="form-select" value={pullForm.packId} onChange={e => pf('packId', e.target.value)}>
-                    <option value="">Select pack…</option>
-                    {boxPacks.map(p => <option key={p.id} value={p.id}>Pack #{p.pack_number}</option>)}
-                    <option value="new">+ New pack</option>
-                  </select>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <select className="form-select" value={pullForm.packId} onChange={e => pf('packId', e.target.value)}>
+                      <option value="">Select pack…</option>
+                      {boxPacks.map(p => <option key={p.id} value={p.id}>Pack #{p.pack_number}</option>)}
+                    </select>
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      style={{ whiteSpace: 'nowrap' }}
+                      onClick={() => {
+                        const nextNum = boxPacks.length > 0
+                          ? Math.max(...boxPacks.map(p => p.pack_number)) + 1
+                          : 1
+                        setPullForm(prev => ({ ...prev, packId: 'new', newPackNumber: String(nextNum) }))
+                      }}
+                    >
+                      + New Pack
+                    </button>
+                  </div>
                 </div>
                 {pullForm.packId === 'new' && (
                   <div className="form-group">

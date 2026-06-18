@@ -109,7 +109,12 @@ export default function Alerts({ onDismiss }) {
               <div key={a.id} className={`alert-item ${a.alert_type === 'price_spike' ? 'success' : 'danger'}`}>
                 <span className="alert-icon">{a.alert_type === 'price_spike' ? '↑' : '↓'}</span>
                 <div className="alert-content">
-                  <div className="alert-title">{a.card_name}{a.foil ? ' ✦' : ''} — {a.set_name}</div>
+                  <div className="alert-title">
+                    <span onClick={() => navigate(`/market?card=${a.card_id}`)} style={{ cursor: 'pointer', borderBottom: '1px dashed currentColor' }}>
+                      {a.card_name}{a.foil ? ' ✦' : ''}
+                    </span>
+                    {' '}— {a.set_name}
+                  </div>
                   <div className="alert-desc">{a.message}</div>
                   <div style={{ display: 'flex', gap: 10, marginTop: 4, alignItems: 'center' }}>
                     <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{fmtDate(a.created_at)}</span>
@@ -164,10 +169,12 @@ export default function Alerts({ onDismiss }) {
                   <th>Action</th>
                 </tr></thead>
                 <tbody>
-                  {[...listingAlerts].sort((a, b) => Math.abs(b.overpriced_pct) - Math.abs(a.overpriced_pct)).map(l => (
+                  {[...listingAlerts].sort((a, b) => Math.abs(b.listed_price - b.tcgplayer_market) - Math.abs(a.listed_price - a.tcgplayer_market)).map(l => (
                     <tr key={l.listing_id}>
                       <td>
-                        <div className="name-cell">{l.card_name || l.title}</div>
+                        <div className="name-cell" onClick={() => l.card_id && navigate(`/market?card=${l.card_id}`)} style={l.card_id ? { cursor: 'pointer' } : undefined}>
+                          {l.card_name || l.title}
+                        </div>
                         <div className="set-cell">{l.rarity}{l.foil ? ' · Foil' : ''}{l.set_name ? ` · ${l.set_name}` : ''}</div>
                         {l.card_breakdown && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{l.card_breakdown}</div>}
                         <div style={{ display: 'flex', gap: 10, marginTop: 4, alignItems: 'center' }}>
@@ -187,8 +194,8 @@ export default function Alerts({ onDismiss }) {
                       <td className="text-right">{usd(l.listed_price)}</td>
                       <td className="text-right text-gold">{usd(l.tcgplayer_market)}</td>
                       <td className="text-right" style={{ color: l.alert_type === 'overpriced' ? 'var(--success)' : 'var(--danger)', fontWeight: 500 }}>
-                        <div>{fmtPct(l.overpriced_pct)}</div>
-                        <div style={{ fontSize: 11, fontWeight: 400, opacity: 0.8 }}>{fmtChg(l.listed_price - l.tcgplayer_market)}</div>
+                        <div>{fmtChg(l.listed_price - l.tcgplayer_market)}</div>
+                        <div style={{ fontSize: 11, fontWeight: 400, opacity: 0.8 }}>{fmtPct(l.overpriced_pct)}</div>
                       </td>
                       <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                         {l.alert_type === 'overpriced' ? `Consider lowering to ${usd(l.tcgplayer_market)}` : `Consider raising to ${usd(l.tcgplayer_market)}`}
@@ -221,7 +228,9 @@ export default function Alerts({ onDismiss }) {
                 {staleListings.map(l => (
                   <tr key={l.listing_id}>
                     <td>
-                      <div className="name-cell">{l.card_name || l.title}</div>
+                      <div className="name-cell" onClick={() => l.card_id && navigate(`/market?card=${l.card_id}`)} style={l.card_id ? { cursor: 'pointer' } : undefined}>
+                        {l.card_name || l.title}
+                      </div>
                       <div className="set-cell">{l.rarity}{l.foil ? ' · Foil' : ''}{l.set_name ? ` · ${l.set_name}` : ''}</div>
                       <div style={{ display: 'flex', gap: 10, marginTop: 4, alignItems: 'center' }}>
                         <button onClick={() => navigate(`/listings?highlight=${l.listing_id}`)} style={{ fontSize: 11, color: 'var(--gold)', background: 'none', border: 'none', borderBottom: '1px dashed var(--gold)', padding: 0, cursor: 'pointer' }}>View listing &rarr;</button>

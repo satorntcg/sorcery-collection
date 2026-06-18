@@ -188,7 +188,7 @@ export default function Dashboard() {
             </thead>
             <tbody>
               {inventory.slice(0, 10).map(card => (
-                <tr key={card.card_id ?? card.id}>
+                <tr key={card.card_id ?? card.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/cards/${encodeURIComponent((card.name ?? '').toLowerCase().replace(/\s+/g, '-'))}/${card.card_id ?? card.id}`)}>
                   <td className="name-cell">{card.name}{card.foil ? ' ✦' : ''}</td>
                   <td className="text-muted">{card.set_name}</td>
                   <td><span className={`badge badge-${card.rarity}`}>{card.rarity}</span></td>

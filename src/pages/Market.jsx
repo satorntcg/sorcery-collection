@@ -132,11 +132,12 @@ export default function Market() {
           date:     (l.status === 'sold' && l.sold_at ? l.sold_at : l.listed_at)?.slice(0, 10) ?? today,
         })),
       ]
-      // Deduplicate lot listings by listing id
+      // Deduplicate lot listings by listing id, and skip any already shown as singles
+      const singleIds = new Set((myListingsData ?? []).map(l => l.id))
       const seenLotIds = new Set()
       for (const lc of (lotData ?? [])) {
         const el = lc.ebay_listings
-        if (!el || !['active', 'sold'].includes(el.status) || seenLotIds.has(el.id)) continue
+        if (!el || !['active', 'sold'].includes(el.status) || seenLotIds.has(el.id) || singleIds.has(el.id)) continue
         seenLotIds.add(el.id)
         const rawDate = el.status === 'sold' && el.sold_at
           ? el.sold_at : (el.listed_at ?? el.created_at ?? today)
