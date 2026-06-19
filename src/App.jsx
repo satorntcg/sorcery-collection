@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate, Outlet } from 'react-router-dom'
 import { useState, useEffect } from 'react'
+import { Analytics } from '@vercel/analytics/react'
 import { supabase } from './lib/supabase'
 import Sidebar from './components/Sidebar'
 import PublicNav from './components/PublicNav'
@@ -78,43 +79,46 @@ export default function App() {
   }, [session])
 
   return (
-    <Routes>
-      {/* Public routes — no auth required */}
-      <Route element={<PublicLayout session={session} />}>
-        <Route path="/"          element={<Home />} />
-        <Route path="/cards"     element={<PublicCards />} />
-        <Route path="/cards/:slug/:id" element={<CardDetail />} />
-        <Route path="/rules"     element={<RulesChat />} />
-        <Route path="/videos"    element={<PublicVideos />} />
-        <Route path="/contact"   element={<Contact />} />
-      </Route>
-
-      {/* Login — redirect to dashboard if already signed in */}
-      <Route path="/login" element={
-        session === undefined
-          ? <div className="loading" style={{ height: '100vh' }}>Loading…</div>
-          : session
-          ? <Navigate to="/dashboard" replace />
-          : <Login />
-      } />
-
-      {/* Private routes — require auth, render with sidebar */}
-      <Route element={<PrivateGuard session={session} />}>
-        <Route element={<PrivateLayout alertCount={alertCount} />}>
-          <Route path="/dashboard"   element={<Dashboard />} />
-          <Route path="/inventory"   element={<Inventory />} />
-          <Route path="/alerts"      element={<Alerts onDismiss={() => setAlertCount(c => Math.max(0, c - 1))} />} />
-          <Route path="/listings"    element={<Listings />} />
-          <Route path="/boxes"       element={<Boxes />} />
-          <Route path="/market"      element={<Market />} />
-          <Route path="/youtube"     element={<YouTube />} />
-          <Route path="/import"      element={<Import />} />
-          <Route path="/settings"    element={<Settings />} />
-          <Route path="/suggestions" element={<ListingSuggestions />} />
-          <Route path="/boxev"       element={<BoxEV />} />
-          <Route path="*"            element={<Navigate to="/dashboard" replace />} />
+    <>
+      <Routes>
+        {/* Public routes — no auth required */}
+        <Route element={<PublicLayout session={session} />}>
+          <Route path="/"          element={<Home />} />
+          <Route path="/cards"     element={<PublicCards />} />
+          <Route path="/cards/:slug/:id" element={<CardDetail />} />
+          <Route path="/rules"     element={<RulesChat />} />
+          <Route path="/videos"    element={<PublicVideos />} />
+          <Route path="/contact"   element={<Contact />} />
         </Route>
-      </Route>
-    </Routes>
+
+        {/* Login — redirect to dashboard if already signed in */}
+        <Route path="/login" element={
+          session === undefined
+            ? <div className="loading" style={{ height: '100vh' }}>Loading…</div>
+            : session
+            ? <Navigate to="/dashboard" replace />
+            : <Login />
+        } />
+
+        {/* Private routes — require auth, render with sidebar */}
+        <Route element={<PrivateGuard session={session} />}>
+          <Route element={<PrivateLayout alertCount={alertCount} />}>
+            <Route path="/dashboard"   element={<Dashboard />} />
+            <Route path="/inventory"   element={<Inventory />} />
+            <Route path="/alerts"      element={<Alerts onDismiss={() => setAlertCount(c => Math.max(0, c - 1))} />} />
+            <Route path="/listings"    element={<Listings />} />
+            <Route path="/boxes"       element={<Boxes />} />
+            <Route path="/market"      element={<Market />} />
+            <Route path="/youtube"     element={<YouTube />} />
+            <Route path="/import"      element={<Import />} />
+            <Route path="/settings"    element={<Settings />} />
+            <Route path="/suggestions" element={<ListingSuggestions />} />
+            <Route path="/boxev"       element={<BoxEV />} />
+            <Route path="*"            element={<Navigate to="/dashboard" replace />} />
+          </Route>
+        </Route>
+      </Routes>
+      <Analytics />
+    </>
   )
 }
