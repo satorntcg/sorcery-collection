@@ -11,15 +11,21 @@ const calcNet = (price) => price - (price * EBAY_FEE_PCT + EBAY_FEE_FLAT) - DEFA
 
 // ── Grouping logic ────────────────────────────────────────────
 function groupCards(cards) {
+  // Expand each card by available_qty so multiple owned copies can fill separate lots
+  const expanded = cards.flatMap(c => {
+    const qty = Math.max(1, Number(c.available_qty ?? 1))
+    return Array.from({ length: qty }, () => c)
+  })
+
   const groups = []
 
-  // cards is already pre-filtered by the available check; just split into tiers.
+  // expanded is already pre-filtered by the available check; just split into tiers.
   // Sites always go into site-specific pools regardless of rarity.
-  const sites       = cards.filter(c => c.is_site && !c.foil)
-  const siteFoils   = cards.filter(c => c.is_site &&  c.foil)
-  const uniqueCards = cards.filter(c => c.rarity === 'unique' && !c.is_site)
-  const allFoils    = cards.filter(c => c.foil && c.rarity !== 'unique' && !c.is_site)
-  const elites      = cards.filter(c => !c.foil && c.rarity === 'elite' && !c.is_site)
+  const sites       = expanded.filter(c => c.is_site && !c.foil)
+  const siteFoils   = expanded.filter(c => c.is_site &&  c.foil)
+  const uniqueCards = expanded.filter(c => c.rarity === 'unique' && !c.is_site)
+  const allFoils    = expanded.filter(c => c.foil && c.rarity !== 'unique' && !c.is_site)
+  const elites      = expanded.filter(c => !c.foil && c.rarity === 'elite' && !c.is_site)
 
   // Helper: pack cards into lots of max 6, only emit if total >= $20
   function packIntoLots(cardList, tierLabel, color) {
@@ -128,19 +134,30 @@ async function createListing(group, aiSuggestion) {
 
   if (error) throw error
 
-  // Link all cards in junction table
+  // Build per-card quantity map (same card can appear multiple times when qty > 1)
+  const cardQtyMap = {}
+  for (const c of group.cards) {
+    cardQtyMap[c.id] = { card: c, qty: (cardQtyMap[c.id]?.qty ?? 0) + 1 }
+  }
+
+  // Link all cards in junction table, one row per unique card with quantity
   if (listing && group.cards.length > 0) {
     const perCardPrice = parseFloat((group.total / group.cards.length).toFixed(2))
     await supabase.from('ebay_listing_cards').insert(
-      group.cards.map(c => ({ listing_id: listing.id, card_id: c.id, price: perCardPrice }))
+      Object.entries(cardQtyMap).map(([cardId, { qty }]) => ({
+        listing_id: listing.id,
+        card_id: cardId,
+        price: perCardPrice,
+        quantity: qty,
+      }))
     )
   }
 
-  // Increment quantity_listed for each card
-  for (const card of group.cards) {
-    const { data: cardRow } = await supabase.from('cards').select('quantity_listed').eq('id', card.id).single()
+  // Increment quantity_listed for each card by how many copies are in this group
+  for (const [cardId, { qty }] of Object.entries(cardQtyMap)) {
+    const { data: cardRow } = await supabase.from('cards').select('quantity_listed').eq('id', cardId).single()
     if (cardRow) {
-      await supabase.from('cards').update({ quantity_listed: (cardRow.quantity_listed ?? 0) + 1 }).eq('id', card.id)
+      await supabase.from('cards').update({ quantity_listed: (cardRow.quantity_listed ?? 0) + qty }).eq('id', cardId)
     }
   }
 
@@ -198,11 +215,17 @@ export default function ListingSuggestions() {
         return (c.rarity === 'elite' || c.rarity === 'unique' || c.foil || c.card_type === 'site') && owned > (singleList + lotListed) && price > 0
       })
 
-      const withSite = available.map(c => ({
-        ...c,
-        card_id: c.id,
-        is_site: c.card_type === 'site',
-      }))
+      const withSite = available.map(c => {
+        const owned      = Number(c.quantity_owned ?? 0)
+        const singleList = Number(c.active_listing_count ?? 0)
+        const lotListed  = lotListedMap[c.id] ?? 0
+        return {
+          ...c,
+          card_id: c.id,
+          is_site: c.card_type === 'site',
+          available_qty: Math.max(0, owned - singleList - lotListed),
+        }
+      })
 
       setCards(withSite)
       const grouped = groupCards(withSite)

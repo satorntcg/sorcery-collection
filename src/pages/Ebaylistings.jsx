@@ -960,6 +960,7 @@ export default function EbayListings() {
       l.title?.toLowerCase().includes(q) ||
       l.card_name?.toLowerCase().includes(q) ||
       l.set_name?.toLowerCase().includes(q) ||
+      l.all_card_names?.toLowerCase().includes(q) ||
       l.ebay_url?.includes(q)
     )
   })

@@ -1,5 +1,5 @@
 // ============================================================
-// Edge Function: daily_price_check v18
+// Edge Function: daily_price_check v19
 // eBay prices ONLY — TCGPlayer handled by Google Apps Script
 // Processes BATCH_SIZE cards per run, skips cards already
 // checked today. Only processes cards that have a TCGplayer
@@ -358,14 +358,17 @@ Deno.serve(async (req) => {
     console.log("Step 1: Loading today's snapshot state...");
     const { data: todaySnaps } = await supabase
       .from("price_snapshots")
-      .select("card_id, ebay_sold_avg")
+      .select("card_id, ebay_sold_avg, ebay_sold_count")
       .gte("checked_at", todayStart.toISOString())
       .limit(50000);
 
     const hasSnapshotToday = new Set((todaySnaps ?? []).map(s => s.card_id));
+    // Use ebay_sold_count (not ebay_sold_avg) so cards with 0/1 eBay results
+    // don't get reprocessed every batch — ebay_sold_count is always written,
+    // ebay_sold_avg is left null when count < 2.
     const alreadyHasEbay   = new Set(
       (todaySnaps ?? [])
-        .filter(s => s.ebay_sold_avg !== null)
+        .filter(s => s.ebay_sold_count !== null)
         .map(s => s.card_id)
     );
 

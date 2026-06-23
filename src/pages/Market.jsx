@@ -152,7 +152,7 @@ export default function Market() {
         })
       }
       listingsDisplay.sort((a, b) => b.date.localeCompare(a.date))
-      setMyListings(listingsDisplay)
+      setMyListings(listingsDisplay.filter(l => l.price > 0))
 
       const entries = new Map()
       for (const s of (snapData ?? [])) {
@@ -161,7 +161,7 @@ export default function Market() {
           rawDate:  key,
           date:     dateShort(s.checked_at),
           TCGPlayer: s.tcgplayer_market != null ? Number(s.tcgplayer_market) : null,
-          eBay:      s.ebay_sold_avg    != null ? Number(s.ebay_sold_avg)    : null,
+          eBay:      s.ebay_sold_avg != null && Number(s.ebay_sold_avg) > 0 ? Number(s.ebay_sold_avg) : null,
           'My eBay': null,
         })
       }
@@ -358,7 +358,7 @@ export default function Market() {
                         eBay sold ↗
                       </a>
                     </div>
-                    <div style={{ fontSize: 18, fontWeight: 300, color: 'var(--gold-light)' }}>{usd(displayCard?.ebay_sold_avg)}</div>
+                    <div style={{ fontSize: 18, fontWeight: 300, color: 'var(--gold-light)' }}>{displayCard?.ebay_sold_avg ? usd(displayCard.ebay_sold_avg) : '—'}</div>
                   </div>
                   <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)' }}>
                     <div style={{ fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
