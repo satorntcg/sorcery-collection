@@ -1,5 +1,5 @@
 // ============================================================
-// Edge Function: daily_price_check v19
+// Edge Function: daily_price_check v20
 // eBay prices ONLY — TCGPlayer handled by Google Apps Script
 // Processes BATCH_SIZE cards per run, skips cards already
 // checked today. Only processes cards that have a TCGplayer
@@ -348,36 +348,50 @@ Deno.serve(async (req) => {
     return new Response("Method not allowed", { status: 405 });
   }
 
-  console.log(`Starting eBay price check v18 — batch size: ${BATCH_SIZE} — ${new Date().toISOString()}`);
+  console.log(`Starting eBay price check v20 — batch size: ${BATCH_SIZE} — ${new Date().toISOString()}`);
 
   try {
     const todayStart = new Date();
     todayStart.setUTCHours(0, 0, 0, 0);
 
     // ── 1. Load today's snapshots — track which have TCG snapshot and which have eBay ──
+    // Paginate in chunks of 1000 to bypass PostgREST's default max-rows cap.
     console.log("Step 1: Loading today's snapshot state...");
-    const { data: todaySnaps } = await supabase
-      .from("price_snapshots")
-      .select("card_id, ebay_sold_avg, ebay_sold_count")
-      .gte("checked_at", todayStart.toISOString())
-      .limit(50000);
+    type SnapRow = { card_id: string; ebay_sold_avg: number | null; ebay_sold_count: number | null };
+    const todaySnaps: SnapRow[] = [];
+    for (let snapPage = 0; ; snapPage++) {
+      const { data } = await supabase
+        .from("price_snapshots")
+        .select("card_id, ebay_sold_avg, ebay_sold_count")
+        .gte("checked_at", todayStart.toISOString())
+        .range(snapPage * 1000, (snapPage + 1) * 1000 - 1);
+      todaySnaps.push(...(data ?? []));
+      if (!data || data.length < 1000) break;
+    }
 
-    const hasSnapshotToday = new Set((todaySnaps ?? []).map(s => s.card_id));
+    const hasSnapshotToday = new Set(todaySnaps.map(s => s.card_id));
     // Use ebay_sold_count (not ebay_sold_avg) so cards with 0/1 eBay results
     // don't get reprocessed every batch — ebay_sold_count is always written,
     // ebay_sold_avg is left null when count < 2.
     const alreadyHasEbay   = new Set(
-      (todaySnaps ?? [])
+      todaySnaps
         .filter(s => s.ebay_sold_count !== null)
         .map(s => s.card_id)
     );
 
-    // ── 2. Load all cards ──
-    const { data: allCards, error: cardsError } = await supabase
-      .from("cards")
-      .select("id, name, set_name, foil, tcgplayer_id")
-      .order("name")
-      .limit(10000);
+    // ── 2. Load all cards (paginated to bypass PostgREST 1000-row default) ──
+    const allCards: Card[] = [];
+    let cardsError = null;
+    for (let cardPage = 0; ; cardPage++) {
+      const { data, error } = await supabase
+        .from("cards")
+        .select("id, name, set_name, foil, tcgplayer_id")
+        .order("name")
+        .range(cardPage * 1000, (cardPage + 1) * 1000 - 1);
+      if (error) { cardsError = error; break; }
+      allCards.push(...(data ?? []));
+      if (!data || data.length < 1000) break;
+    }
 
     if (cardsError) throw cardsError;
 
