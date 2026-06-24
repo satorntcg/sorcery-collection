@@ -225,7 +225,7 @@ export default function Market() {
             Price history and manual price check trigger
             {lastChecked && (
               <span style={{ marginLeft: 12, color: 'var(--text-muted)' }}>
-                · Prices last updated <span style={{ color: 'var(--gold-dim)' }} title={dateFull(lastChecked)}>{timeAgo(lastChecked)}</span>
+                · TCGPlayer prices last updated <span style={{ color: 'var(--gold-dim)' }} title={dateFull(lastChecked)}>{timeAgo(lastChecked)}</span>
                 <span style={{ color: 'var(--text-muted)', fontSize: 11, marginLeft: 6 }}>({dateFull(lastChecked)})</span>
               </span>
             )}
@@ -260,7 +260,7 @@ export default function Market() {
             <span className="panel-title">Cards</span>
             {lastChecked && (
               <span style={{ fontSize: 10, color: 'var(--text-muted)' }} title={dateFull(lastChecked)}>
-                Updated {timeAgo(lastChecked)}
+                TCGPlayer {timeAgo(lastChecked)}
               </span>
             )}
           </div>

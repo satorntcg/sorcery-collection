@@ -1,5 +1,5 @@
 // ============================================================
-// Edge Function: daily_price_check v21
+// Edge Function: daily_price_check v22
 // eBay prices ONLY — TCGPlayer handled by Google Apps Script
 // Processes BATCH_SIZE cards per run, skips cards already
 // checked today. Only processes cards that have a TCGplayer
@@ -348,7 +348,7 @@ Deno.serve(async (req) => {
     return new Response("Method not allowed", { status: 405 });
   }
 
-  console.log(`Starting eBay price check v21 — batch size: ${BATCH_SIZE} — ${new Date().toISOString()}`);
+  console.log(`Starting eBay price check v22 — batch size: ${BATCH_SIZE} — ${new Date().toISOString()}`);
 
   try {
     // ── 1. Find snapshots from the last 48h that have TCG prices but no eBay data ──
@@ -458,6 +458,9 @@ Deno.serve(async (req) => {
         console.log(`  eBay: ${cardLabel} avg=$${ebay.avg} count=${ebay.count}`);
 
         const ebayValid = ebay.count >= 2;
+        // Update ALL pending snapshots for this card in the window, not just the one
+        // we found — older null rows from previous days would otherwise keep the card
+        // re-queued on every run.
         const { error } = await supabase
           .from("price_snapshots")
           .update({
@@ -466,7 +469,9 @@ Deno.serve(async (req) => {
             ebay_sold_high:  ebayValid ? ebay.high : null,
             ebay_sold_count: ebay.count,
           })
-          .eq("id", card.snapId);
+          .eq("card_id", card.id)
+          .gte("checked_at", lookback.toISOString())
+          .is("ebay_sold_count", null);
 
         if (error) throw new Error(`Snapshot update failed for ${card.name}: ${error.message}`);
 
