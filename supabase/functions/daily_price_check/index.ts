@@ -1,5 +1,5 @@
 // ============================================================
-// Edge Function: daily_price_check v20
+// Edge Function: daily_price_check v21
 // eBay prices ONLY — TCGPlayer handled by Google Apps Script
 // Processes BATCH_SIZE cards per run, skips cards already
 // checked today. Only processes cards that have a TCGplayer
@@ -237,8 +237,8 @@ async function sendStatusEmail(
       </div>
     </div>
     <div style="margin-top:16px;padding-top:16px;border-top:1px solid #2A2520;font-size:12px;color:#5A5448;text-align:center;">
-      Batch: ${batchInfo.batchSize} cards · ${batchInfo.remaining} remaining · ${batchInfo.withSnapshot} of ${batchInfo.total} cards have TCG snapshot today
-      ${allDone ? ' · <span style="color:#4CAF6E;">All cards checked ✓</span>' : ''}
+      Batch: ${batchInfo.batchSize} cards · ${batchInfo.remaining} remaining · ${batchInfo.withSnapshot} need eBay check · ${batchInfo.total} total cards
+      ${allDone ? ' · <span style="color:#4CAF6E;">All pending checked ✓</span>' : ''}
     </div>
     ${lastCard ? `
     <div style="margin-top:10px;padding-top:10px;border-top:1px solid #2A2520;font-size:12px;color:#5A5448;text-align:center;">
@@ -348,85 +348,81 @@ Deno.serve(async (req) => {
     return new Response("Method not allowed", { status: 405 });
   }
 
-  console.log(`Starting eBay price check v20 — batch size: ${BATCH_SIZE} — ${new Date().toISOString()}`);
+  console.log(`Starting eBay price check v21 — batch size: ${BATCH_SIZE} — ${new Date().toISOString()}`);
 
   try {
-    const todayStart = new Date();
-    todayStart.setUTCHours(0, 0, 0, 0);
+    // ── 1. Find snapshots from the last 48h that have TCG prices but no eBay data ──
+    // Using a rolling 48h window instead of a calendar-day boundary prevents work being
+    // abandoned when batches cross midnight UTC.  ebay_sold_count is always written
+    // (even when count = 0), so NULL means "not yet checked by this function".
+    console.log("Step 1: Finding snapshots that need eBay prices...");
+    const lookback = new Date(Date.now() - 48 * 60 * 60 * 1000);
 
-    // ── 1. Load today's snapshots — track which have TCG snapshot and which have eBay ──
-    // Paginate in chunks of 1000 to bypass PostgREST's default max-rows cap.
-    console.log("Step 1: Loading today's snapshot state...");
-    type SnapRow = { card_id: string; ebay_sold_avg: number | null; ebay_sold_count: number | null };
-    const todaySnaps: SnapRow[] = [];
-    for (let snapPage = 0; ; snapPage++) {
-      const { data } = await supabase
-        .from("price_snapshots")
-        .select("card_id, ebay_sold_avg, ebay_sold_count")
-        .gte("checked_at", todayStart.toISOString())
-        .range(snapPage * 1000, (snapPage + 1) * 1000 - 1);
-      todaySnaps.push(...(data ?? []));
-      if (!data || data.length < 1000) break;
-    }
+    type PendingSnap = {
+      id: string;
+      card_id: string;
+      tcgplayer_market: number | null;
+      cards: Card | null;
+    };
 
-    const hasSnapshotToday = new Set(todaySnaps.map(s => s.card_id));
-    // Use ebay_sold_count (not ebay_sold_avg) so cards with 0/1 eBay results
-    // don't get reprocessed every batch — ebay_sold_count is always written,
-    // ebay_sold_avg is left null when count < 2.
-    const alreadyHasEbay   = new Set(
-      todaySnaps
-        .filter(s => s.ebay_sold_count !== null)
-        .map(s => s.card_id)
-    );
-
-    // ── 2. Load all cards (paginated to bypass PostgREST 1000-row default) ──
-    const allCards: Card[] = [];
-    let cardsError = null;
-    for (let cardPage = 0; ; cardPage++) {
+    const pendingSnaps: PendingSnap[] = [];
+    for (let page = 0; ; page++) {
       const { data, error } = await supabase
-        .from("cards")
-        .select("id, name, set_name, foil, tcgplayer_id")
-        .order("name")
-        .range(cardPage * 1000, (cardPage + 1) * 1000 - 1);
-      if (error) { cardsError = error; break; }
-      allCards.push(...(data ?? []));
+        .from("price_snapshots")
+        .select("id, card_id, tcgplayer_market, cards(id, name, set_name, foil, tcgplayer_id)")
+        .not("tcgplayer_market", "is", null)
+        .is("ebay_sold_count", null)
+        .gte("checked_at", lookback.toISOString())
+        .order("checked_at", { ascending: false })
+        .range(page * 1000, (page + 1) * 1000 - 1);
+      if (error) throw error;
+      pendingSnaps.push(...((data as PendingSnap[]) ?? []));
       if (!data || data.length < 1000) break;
     }
 
-    if (cardsError) throw cardsError;
+    // Keep only the most recent pending snapshot per card
+    const cardToSnap = new Map<string, PendingSnap>();
+    for (const s of pendingSnaps) {
+      if (!cardToSnap.has(s.card_id) && s.cards) cardToSnap.set(s.card_id, s);
+    }
 
-    const total        = allCards?.length ?? 0;
-    const withSnapshot = hasSnapshotToday.size;
+    // ── 2. Get total card count for reporting ──
+    const { count: totalCount } = await supabase
+      .from("cards")
+      .select("id", { count: "exact", head: true });
+    const total = totalCount ?? 0;
 
-    // Only process cards that have a TCGplayer snapshot today but no eBay data yet
-    const needsCheck = (allCards ?? []).filter(c =>
-      hasSnapshotToday.has(c.id) && !alreadyHasEbay.has(c.id)
-    );
+    type BatchCard = Card & { snapId: string; tcgMarket: number | null };
+    const allPending: BatchCard[] = [];
+    for (const [, snap] of cardToSnap) {
+      allPending.push({ ...snap.cards!, snapId: snap.id, tcgMarket: snap.tcgplayer_market });
+    }
 
-    const batch     = needsCheck.slice(0, BATCH_SIZE);
-    const remaining = needsCheck.length;
+    const batch     = allPending.slice(0, BATCH_SIZE);
+    const remaining = allPending.length;
+    const pendingTotal = cardToSnap.size;
 
-    console.log(`Cards total: ${total} | with TCG snapshot: ${withSnapshot} | need eBay: ${remaining} | this batch: ${batch.length}`);
+    console.log(`Cards total: ${total} | need eBay: ${pendingTotal} | this batch: ${batch.length}`);
 
     if (!batch.length) {
-      console.log("All cards with snapshots have eBay prices today — nothing to do");
+      console.log("All cards with snapshots have eBay prices — nothing to do");
       return new Response(
-        JSON.stringify({ message: "All cards checked today.", total, withSnapshot, remaining: 0 }),
+        JSON.stringify({ message: "All cards checked.", total, pendingTotal, remaining: 0 }),
         { status: 200, headers: CORS_HEADERS }
       );
     }
 
-    // ── 3. Load YESTERDAY's prices for alert comparison ──
-    console.log("Step 2: Loading yesterday's prices for alert comparison...");
-    const yesterday = new Date(todayStart);
-    yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+    // ── 3. Load previous prices for alert comparison (20h–72h ago) ──
+    console.log("Step 2: Loading previous prices for alert comparison...");
+    const alertWindowEnd   = new Date(Date.now() - 20 * 60 * 60 * 1000);
+    const alertWindowStart = new Date(Date.now() - 72 * 60 * 60 * 1000);
 
     const { data: prevSnaps } = await supabase
       .from("price_snapshots")
       .select("card_id, tcgplayer_market")
       .in("card_id", batch.map(c => c.id))
-      .gte("checked_at", yesterday.toISOString())
-      .lt("checked_at", todayStart.toISOString())
+      .gte("checked_at", alertWindowStart.toISOString())
+      .lt("checked_at", alertWindowEnd.toISOString())
       .not("tcgplayer_market", "is", null)
       .order("checked_at", { ascending: false });
 
@@ -435,7 +431,7 @@ Deno.serve(async (req) => {
       if (!prevMap.has(s.card_id)) prevMap.set(s.card_id, s.tcgplayer_market as number);
     }
 
-    // ── 4. Get eBay token (OAuth — still needed for other potential Browse API calls) ──
+    // ── 4. Get eBay token ──
     console.log("Step 3: Getting eBay token...");
     const ebayToken = await getEbayToken();
     console.log("eBay token OK");
@@ -453,25 +449,13 @@ Deno.serve(async (req) => {
         console.log(`Time budget reached — stopping early (${results.updated} updated so far)`);
         break;
       }
-      const chunk = (batch as Card[]).slice(i, i + CHUNK_SIZE);
+      const chunk = batch.slice(i, i + CHUNK_SIZE);
       console.log(`Chunk ${Math.floor(i / CHUNK_SIZE) + 1}: processing ${chunk.map(c => c.name).join(', ')}`);
 
       const chunkResults = await Promise.allSettled(chunk.map(async (card) => {
         const cardLabel = `${card.name}${card.foil ? ' (Foil)' : ''}`;
         const ebay = await fetchEbayPrices(card.name, card.foil ?? false, ebayToken);
         console.log(`  eBay: ${cardLabel} avg=$${ebay.avg} count=${ebay.count}`);
-
-        const { data: existingSnap } = await supabase
-          .from("price_snapshots")
-          .select("id, tcgplayer_market")
-          .eq("card_id", card.id)
-          .gte("checked_at", todayStart.toISOString())
-          .maybeSingle();
-
-        if (!existingSnap) {
-          console.log(`  → no snapshot for ${card.name}`);
-          return 'skipped' as const;
-        }
 
         const ebayValid = ebay.count >= 2;
         const { error } = await supabase
@@ -482,14 +466,14 @@ Deno.serve(async (req) => {
             ebay_sold_high:  ebayValid ? ebay.high : null,
             ebay_sold_count: ebay.count,
           })
-          .eq("id", existingSnap.id);
+          .eq("id", card.snapId);
 
         if (error) throw new Error(`Snapshot update failed for ${card.name}: ${error.message}`);
 
         await checkAndCreateAlerts(
           card.id, card.name,
           prevMap.get(card.id) ?? null,
-          existingSnap.tcgplayer_market,
+          card.tcgMarket,
           ALERT_THRESHOLD,
           pendingEmailAlerts
         );
@@ -518,7 +502,7 @@ Deno.serve(async (req) => {
         batchSize:    batch.length,
         remaining:    remaining - batch.length,
         total,
-        withSnapshot,
+        withSnapshot: pendingTotal,
       },
       lastCard,
     );
@@ -531,7 +515,7 @@ Deno.serve(async (req) => {
         checked_at:    new Date().toISOString(),
         batch_size:    batch.length,
         remaining:     remaining - batch.length,
-        with_snapshot: withSnapshot,
+        pending_total: pendingTotal,
         last_card:     lastCard,
         total,
         ...results,
