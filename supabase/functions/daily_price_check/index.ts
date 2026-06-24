@@ -1,5 +1,5 @@
 // ============================================================
-// Edge Function: daily_price_check v22
+// Edge Function: daily_price_check v23
 // eBay prices ONLY — TCGPlayer handled by Google Apps Script
 // Processes BATCH_SIZE cards per run, skips cards already
 // checked today. Only processes cards that have a TCGplayer
@@ -20,7 +20,7 @@ const ALERT_THRESHOLD  = parseFloat(Deno.env.get("ALERT_PCT_THRESHOLD") ?? "15")
 const RESEND_API_KEY   = Deno.env.get("RESEND_API_KEY")!;
 const ALERT_EMAIL_TO   = Deno.env.get("ALERT_EMAIL_TO") ?? "satorntcg@gmail.com";
 const ALERT_EMAIL_FROM = "Sorcery TCG Manager <alerts@satorntcg.com>";
-const BATCH_SIZE       = parseInt(Deno.env.get("BATCH_SIZE") ?? "25");
+const BATCH_SIZE       = parseInt(Deno.env.get("BATCH_SIZE") ?? "100");
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin":  "*",
@@ -348,7 +348,7 @@ Deno.serve(async (req) => {
     return new Response("Method not allowed", { status: 405 });
   }
 
-  console.log(`Starting eBay price check v22 — batch size: ${BATCH_SIZE} — ${new Date().toISOString()}`);
+  console.log(`Starting eBay price check v23 — batch size: ${BATCH_SIZE} — ${new Date().toISOString()}`);
 
   try {
     // ── 1. Find snapshots from the last 48h that have TCG prices but no eBay data ──
