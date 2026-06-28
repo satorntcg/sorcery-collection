@@ -878,8 +878,9 @@ function DeleteSoldModal({ listing, onClose, onSaved }) {
 export default function EbayListings() {
   const [tab, setTab]           = useState('active')
   const [search, setSearch]         = useState('')
-  const [unlinkedOnly, setUnlinkedOnly] = useState(false)
-  const [noUrlOnly, setNoUrlOnly]       = useState(false)
+  const [unlinkedOnly, setUnlinkedOnly]   = useState(false)
+  const [noUrlOnly, setNoUrlOnly]         = useState(false)
+  const [tcgListedOnly, setTcgListedOnly] = useState(false)
   const [listings, setListings] = useState([])
   const [cards, setCards]       = useState([])
   const [pnl, setPnl]           = useState(null)
@@ -930,14 +931,17 @@ export default function EbayListings() {
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
-    const [activeRes, soldRes, pnlRes] = await Promise.all([
+    const [activeRes, soldRes, pnlRes, tcgRes] = await Promise.all([
       supabase.from('v_ebay_active').select('*'),
       supabase.from('v_ebay_sold').select('*'),
       supabase.from('v_global_pnl').select('*').single(),
+      supabase.from('ebay_listings').select('id, tcgplayer_listed'),
     ])
+    const tcgMap = {}
+    for (const r of (tcgRes.data ?? [])) tcgMap[r.id] = r.tcgplayer_listed ?? false
     setListings([
-      ...(activeRes.data || []).map(r => ({ ...r, status: 'active' })),
-      ...(soldRes.data  || []).map(r => ({ ...r, status: 'sold'   })),
+      ...(activeRes.data || []).map(r => ({ ...r, status: 'active', tcgplayer_listed: tcgMap[r.id] ?? false })),
+      ...(soldRes.data  || []).map(r => ({ ...r, status: 'sold',   tcgplayer_listed: tcgMap[r.id] ?? false })),
     ])
     setPnl(pnlRes.data)
     setLoading(false)
@@ -965,6 +969,7 @@ export default function EbayListings() {
   const tabListings    = (tab === 'active' ? activeListings : soldListings).filter(l => {
     if (unlinkedOnly && (l.card_id || l.card_name || (l.card_count ?? 0) > 0)) return false
     if (noUrlOnly && l.ebay_url) return false
+    if (tcgListedOnly && !l.tcgplayer_listed) return false
     if (!search) return true
     const q = search.toLowerCase()
     return (
@@ -1073,6 +1078,13 @@ export default function EbayListings() {
         >
           {noUrlOnly ? '⚠ No eBay URL' : 'Show No eBay URL'}
         </button>
+        <button
+          className={`btn btn-sm ${tcgListedOnly ? 'btn-primary' : 'btn-ghost'}`}
+          onClick={() => setTcgListedOnly(p => !p)}
+          style={{ whiteSpace: 'nowrap' }}
+        >
+          {tcgListedOnly ? '◉ TCGPlayer Listed' : 'TCGPlayer Listed'}
+        </button>
       </div>
 
       {/* ── Active / Sold tables ── */}
@@ -1109,7 +1121,6 @@ export default function EbayListings() {
                         {l.card_name && <div className="set-cell">{l.rarity}{l.foil ? ' · Foil' : ''}{l.set_name ? ` · ${l.set_name}` : ''}{l.tcg_market_price ? ` · TCG ${usd(l.tcg_market_price)}` : ''}</div>}
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3, flexWrap: 'wrap' }}>
                           {l.ebay_url && (() => { const n = ebayItemNum(l.ebay_url); return <a href={l.ebay_url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: 'var(--gold)', textDecoration: 'none', borderBottom: '1px dashed var(--gold)' }}>{n ? `#${n}` : '↗ eBay'}</a> })()}
-                          {l.condition && <span className="badge badge-ordinary">{l.condition}</span>}
                           <button
                             onClick={e => { e.stopPropagation(); toggleTcgListed(l.id, l.tcgplayer_listed) }}
                             title={l.tcgplayer_listed ? 'Listed on TCGPlayer — click to unmark' : 'Not on TCGPlayer — click to mark'}
