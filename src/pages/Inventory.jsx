@@ -141,6 +141,7 @@ export default function Inventory() {
   const [exportResult, setExportResult]  = useState(null)
   const [provenance, setProvenance]      = useState({})
   const [expanded, setExpanded]          = useState(new Set())
+  const [selectedIds, setSelectedIds]    = useState(new Set())
   const [page, setPage]                  = useState(0)
   const PAGE_SIZE = 100
 
@@ -316,6 +317,38 @@ export default function Inventory() {
     })
   }
 
+  function toggleSelect(id) {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  const filteredIds = filtered.map(c => c.card_id ?? c.id)
+  const allFilteredSelected = filteredIds.length > 0 && filteredIds.every(id => selectedIds.has(id))
+  const someFilteredSelected = filteredIds.some(id => selectedIds.has(id))
+
+  function toggleSelectAll() {
+    if (allFilteredSelected) {
+      setSelectedIds(prev => {
+        const next = new Set(prev)
+        filteredIds.forEach(id => next.delete(id))
+        return next
+      })
+    } else {
+      setSelectedIds(prev => {
+        const next = new Set(prev)
+        filteredIds.forEach(id => next.add(id))
+        return next
+      })
+    }
+  }
+
+  const cardsToExport = selectedIds.size > 0
+    ? filtered.filter(c => selectedIds.has(c.card_id ?? c.id))
+    : filtered
+
   return (
     <div className="page">
       <div className="page-header flex-between">
@@ -323,20 +356,32 @@ export default function Inventory() {
           <h1 className="page-title">Inventory</h1>
           <p className="page-subtitle">{cards.length} cards tracked</p>
         </div>
-        <div className="flex gap-8">
+        <div className="flex gap-8" style={{ alignItems: 'center' }}>
+          {selectedIds.size > 0 && (
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              {selectedIds.size} selected
+              <button
+                className="btn btn-ghost btn-sm"
+                style={{ marginLeft: 6, padding: '1px 6px', fontSize: 11 }}
+                onClick={() => setSelectedIds(new Set())}
+              >
+                Clear
+              </button>
+            </span>
+          )}
           <button
             className="btn btn-ghost"
-            onClick={() => exportInventoryCSV(filtered)}
+            onClick={() => exportInventoryCSV(cardsToExport)}
             disabled={loading || filtered.length === 0}
           >
-            ↓ Export CSV
+            ↓ Export CSV{selectedIds.size > 0 ? ` (${selectedIds.size})` : ''}
           </button>
           <button
             className="btn btn-ghost"
-            onClick={() => setExportResult(exportTCGPlayerCSV(cards))}
-            disabled={loading || cards.length === 0}
+            onClick={() => setExportResult(exportTCGPlayerCSV(cardsToExport))}
+            disabled={loading || filtered.length === 0}
           >
-            ↓ Export to TCGPlayer
+            ↓ TCGPlayer{selectedIds.size > 0 ? ` (${selectedIds.size})` : ''}
           </button>
           <button className="btn btn-primary" onClick={openAdd}>+ Add card</button>
         </div>
@@ -408,6 +453,15 @@ export default function Inventory() {
           <table className="data-table">
             <thead>
               <tr>
+                <th style={{ width: 32, padding: '0 8px' }}>
+                  <input
+                    type="checkbox"
+                    checked={allFilteredSelected}
+                    ref={el => { if (el) el.indeterminate = someFilteredSelected && !allFilteredSelected }}
+                    onChange={toggleSelectAll}
+                    title={allFilteredSelected ? 'Deselect all filtered' : 'Select all filtered'}
+                  />
+                </th>
                 <th>Card</th>
                 <th>Rarity</th>
                 <th>Condition</th>
@@ -429,6 +483,13 @@ export default function Inventory() {
                   <>
                     <tr key={id} onClick={() => navigate(`/market?card=${id}`)}
                       style={{ cursor: 'pointer' }}>
+                      <td style={{ width: 32, padding: '0 8px' }} onClick={e => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(id)}
+                          onChange={() => toggleSelect(id)}
+                        />
+                      </td>
                       <td>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           {prov.length > 0 && (
@@ -471,7 +532,7 @@ export default function Inventory() {
                     </tr>
                     {isExpanded && prov.length > 0 && (
                       <tr key={`${id}-prov`} style={{ background: 'var(--bg-raised)' }}>
-                        <td colSpan={10} style={{ padding: '8px 16px 10px 32px' }}>
+                        <td colSpan={11} style={{ padding: '8px 16px 10px 32px' }}>
                           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '0.07em' }}>
                             Pulled from
                           </div>

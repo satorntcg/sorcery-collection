@@ -411,6 +411,7 @@ function EditModal({ listing, cards, onClose, onSaved }) {
   const [quantity, setQuantity]     = useState(listing.quantity ?? 1)
   const [ebayUrl, setEbayUrl]       = useState(listing.ebay_url || '')
   const [notes, setNotes]           = useState(listing.notes || '')
+  const [tcgListed, setTcgListed]   = useState(listing.tcgplayer_listed ?? false)
   const [saving, setSaving]         = useState(false)
   const [error, setError]           = useState('')
   const [cardSearch, setCardSearch] = useState('')
@@ -477,13 +478,14 @@ function EditModal({ listing, cards, onClose, onSaved }) {
     try {
       // Update listing fields
       const { error: err } = await supabase.from('ebay_listings').update({
-        title:         title.trim(),
-        listed_price:  p,
-        shipping_cost: s,
+        title:             title.trim(),
+        listed_price:      p,
+        shipping_cost:     s,
         condition,
-        quantity:      Math.max(1, parseInt(quantity) || 1),
-        ebay_url:      ebayUrl.trim() || null,
-        notes:         notes.trim() || null,
+        quantity:          Math.max(1, parseInt(quantity) || 1),
+        ebay_url:          ebayUrl.trim() || null,
+        notes:             notes.trim() || null,
+        tcgplayer_listed:  tcgListed,
         // Set card_id to first linked card if only one, null if multiple
         card_id:       linkedCards.length === 1 && (linkedCards[0].qty ?? 1) === 1 ? linkedCards[0].id : null,
       }).eq('id', listing.id)
@@ -626,6 +628,10 @@ function EditModal({ listing, cards, onClose, onSaved }) {
             <label className="form-label">Notes</label>
             <textarea className="form-textarea" value={notes} onChange={e => setNotes(e.target.value)} rows={2} />
           </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginTop: 4 }}>
+            <input type="checkbox" checked={tcgListed} onChange={e => setTcgListed(e.target.checked)} />
+            <span className="form-label" style={{ margin: 0 }}>Also listed on TCGPlayer</span>
+          </label>
           {error && <div className="alert-item danger"><span className="alert-content">{error}</span></div>}
         </div>
         <div className="modal-footer">
@@ -949,6 +955,11 @@ export default function EbayListings() {
     setShowCreate(false); setEditTarget(null); setSoldTarget(null); setEndTarget(null); setLinkTarget(null); setDeleteSoldTarget(null)
   }
 
+  async function toggleTcgListed(listingId, current) {
+    setListings(prev => prev.map(l => l.id === listingId ? { ...l, tcgplayer_listed: !current } : l))
+    await supabase.from('ebay_listings').update({ tcgplayer_listed: !current }).eq('id', listingId)
+  }
+
   const activeListings = listings.filter(l => l.status === 'active')
   const soldListings   = listings.filter(l => l.status === 'sold')
   const tabListings    = (tab === 'active' ? activeListings : soldListings).filter(l => {
@@ -1096,8 +1107,23 @@ export default function EbayListings() {
                       <td>
                         <div className="name-cell">{l.card_name || l.title}</div>
                         {l.card_name && <div className="set-cell">{l.rarity}{l.foil ? ' · Foil' : ''}{l.set_name ? ` · ${l.set_name}` : ''}{l.tcg_market_price ? ` · TCG ${usd(l.tcg_market_price)}` : ''}</div>}
-                        {l.ebay_url && (() => { const n = ebayItemNum(l.ebay_url); return <a href={l.ebay_url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: 'var(--gold)', textDecoration: 'none', borderBottom: '1px dashed var(--gold)' }}>{n ? `#${n}` : '↗ eBay'}</a> })()}
-                        {l.condition && <span className="badge badge-ordinary" style={{ marginTop: 3, marginLeft: l.ebay_url ? 8 : 0 }}>{l.condition}</span>}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3, flexWrap: 'wrap' }}>
+                          {l.ebay_url && (() => { const n = ebayItemNum(l.ebay_url); return <a href={l.ebay_url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: 'var(--gold)', textDecoration: 'none', borderBottom: '1px dashed var(--gold)' }}>{n ? `#${n}` : '↗ eBay'}</a> })()}
+                          {l.condition && <span className="badge badge-ordinary">{l.condition}</span>}
+                          <button
+                            onClick={e => { e.stopPropagation(); toggleTcgListed(l.id, l.tcgplayer_listed) }}
+                            title={l.tcgplayer_listed ? 'Listed on TCGPlayer — click to unmark' : 'Not on TCGPlayer — click to mark'}
+                            style={{
+                              fontSize: 10, fontWeight: 700, letterSpacing: '0.04em',
+                              padding: '1px 5px', borderRadius: 3, cursor: 'pointer',
+                              border: l.tcgplayer_listed ? '1px solid rgba(96,165,250,0.4)' : '1px dashed var(--border)',
+                              background: l.tcgplayer_listed ? 'rgba(96,165,250,0.12)' : 'transparent',
+                              color: l.tcgplayer_listed ? '#60a5fa' : 'var(--text-muted)',
+                            }}
+                          >
+                            TCG
+                          </button>
+                        </div>
                       </td>
                       <td style={{ fontSize: 12, color: 'var(--text-secondary)', maxWidth: 160 }}>
                         {(() => {
@@ -1154,7 +1180,10 @@ export default function EbayListings() {
                       <td>
                         <div className="name-cell">{l.card_name || l.title}</div>
                         {l.card_name && <div className="set-cell">{l.rarity}{l.foil ? ' · Foil' : ''}{l.set_name ? ` · ${l.set_name}` : ''}</div>}
-                        {l.ebay_url && (() => { const n = ebayItemNum(l.ebay_url); return <a href={l.ebay_url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: 'var(--gold)', textDecoration: 'none', borderBottom: '1px dashed var(--gold)' }}>{n ? `#${n}` : '↗ eBay'}</a> })()}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 3 }}>
+                          {l.ebay_url && (() => { const n = ebayItemNum(l.ebay_url); return <a href={l.ebay_url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: 'var(--gold)', textDecoration: 'none', borderBottom: '1px dashed var(--gold)' }}>{n ? `#${n}` : '↗ eBay'}</a> })()}
+                          {l.tcgplayer_listed && <span style={{ fontSize: 10, fontWeight: 700, padding: '1px 5px', borderRadius: 3, border: '1px solid rgba(96,165,250,0.4)', background: 'rgba(96,165,250,0.12)', color: '#60a5fa', letterSpacing: '0.04em' }}>TCG</span>}
+                        </div>
                       </td>
                       <td style={{ fontSize: 12, color: 'var(--text-secondary)', maxWidth: 160 }}>
                         {(() => {
