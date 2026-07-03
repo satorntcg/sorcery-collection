@@ -41,6 +41,7 @@ export default function Boxes() {
   const [pullForm,     setPullForm]     = useState(PULL_BLANK)
   const [pullItems,    setPullItems]    = useState([])   // staged cards
   const [boxPacks,     setBoxPacks]     = useState([])
+  const [existingPackCards, setExistingPackCards] = useState([])   // cards already logged in selected pack
   const [cardResults,  setCardResults]  = useState([])
   const [cardSearch,   setCardSearch]   = useState('')
   const [searchOpen,   setSearchOpen]   = useState(false)
@@ -96,11 +97,21 @@ export default function Boxes() {
     setBoxPacks(data ?? [])
   }
 
+  async function loadExistingPackCards(packId) {
+    if (!packId || packId === 'new') { setExistingPackCards([]); return }
+    const { data } = await supabase
+      .from('pack_cards')
+      .select('card_id, quantity, cards ( id, name, rarity, foil, condition )')
+      .eq('pack_id', packId)
+    setExistingPackCards((data ?? []).sort((a, b) => (a.cards?.name ?? '').localeCompare(b.cards?.name ?? '')))
+  }
+
   useEffect(() => { load() }, [])
   useEffect(() => {
     if (selected) { loadBoxCards(selected); loadBoxPacks(selected) }
     else { setBoxCards([]); setBoxPacks([]) }
   }, [selected])
+  useEffect(() => { loadExistingPackCards(pullForm.packId) }, [pullForm.packId])
 
   // Card search autocomplete
   useEffect(() => {
@@ -256,10 +267,52 @@ export default function Boxes() {
   function openPullModal() {
     setPullForm({ ...PULL_BLANK, packId: boxPacks.length === 1 ? boxPacks[0].id : '' })
     setPullItems([])
+    setExistingPackCards([])
     setCardSearch('')
     setCardResults([])
     setSearchOpen(false)
     setPullModal(true)
+  }
+
+  async function removeExistingPackCard(row, askConfirm = true) {
+    if (askConfirm && !confirm(`Remove ${row.cards?.name ?? 'this card'} (×${row.quantity}) from this pack and inventory?`)) return
+    const packId = pullForm.packId
+    try {
+      const { data: existing, error: fetchErr } = await supabase.from('cards').select('quantity_owned').eq('id', row.card_id).single()
+      if (fetchErr) { alert(`Could not fetch card: ${fetchErr.message}`); return }
+      const newOwned = Math.max(0, (existing.quantity_owned ?? 0) - row.quantity)
+      const { error: updErr } = await supabase.from('cards').update({ quantity_owned: newOwned }).eq('id', row.card_id)
+      if (updErr) { alert(`Inventory update failed: ${updErr.message}`); return }
+      const { error: delErr } = await supabase.from('pack_cards').delete().eq('pack_id', packId).eq('card_id', row.card_id)
+      if (delErr) { alert(`Failed to remove card from pack: ${delErr.message}`); return }
+      loadExistingPackCards(packId)
+      loadBoxCards(selected)
+      loadBoxPacks(selected)
+      load()
+    } catch (e) {
+      alert(`Unexpected error: ${e.message}`)
+    }
+  }
+
+  async function updateExistingPackCardQty(row, newQtyRaw) {
+    const newQty = parseInt(newQtyRaw)
+    if (Number.isNaN(newQty) || newQty === row.quantity) return
+    if (newQty <= 0) { await removeExistingPackCard(row, false); return }
+    const delta = newQty - row.quantity
+    try {
+      const { data: existing, error: fetchErr } = await supabase.from('cards').select('quantity_owned').eq('id', row.card_id).single()
+      if (fetchErr) { alert(`Could not fetch card: ${fetchErr.message}`); return }
+      const newOwned = Math.max(0, (existing.quantity_owned ?? 0) + delta)
+      const { error: updErr } = await supabase.from('cards').update({ quantity_owned: newOwned }).eq('id', row.card_id)
+      if (updErr) { alert(`Inventory update failed: ${updErr.message}`); return }
+      const { error: pcErr } = await supabase.from('pack_cards').update({ quantity: newQty }).eq('pack_id', pullForm.packId).eq('card_id', row.card_id)
+      if (pcErr) { alert(`Failed to update pack card: ${pcErr.message}`); return }
+      loadExistingPackCards(pullForm.packId)
+      loadBoxCards(selected)
+      load()
+    } catch (e) {
+      alert(`Unexpected error: ${e.message}`)
+    }
   }
 
   function selectCard(card) {
@@ -638,6 +691,35 @@ export default function Boxes() {
                   </div>
                 )}
               </div>
+
+              {/* ── Cards already in the selected pack ── */}
+              {pullForm.packId && pullForm.packId !== 'new' && (
+                <div style={{ background: 'var(--bg-void)', border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden', marginBottom: 12 }}>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '8px 12px', borderBottom: '1px solid var(--border)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
+                    Cards already in this pack
+                  </div>
+                  {existingPackCards.length === 0 ? (
+                    <div style={{ padding: '10px 12px', fontSize: 12, color: 'var(--text-muted)' }}>No cards logged for this pack yet.</div>
+                  ) : existingPackCards.map(row => (
+                    <div key={row.card_id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px', borderBottom: '1px solid var(--border)', fontSize: 13 }}>
+                      <span className={`badge badge-${row.cards?.rarity}`} style={{ fontSize: 10 }}>{row.cards?.rarity}</span>
+                      <span style={{ flex: 1, color: 'var(--text-primary)' }}>{row.cards?.name}{row.cards?.foil ? ' ✦' : ''}</span>
+                      <input
+                        type="number"
+                        min="0"
+                        defaultValue={row.quantity}
+                        onBlur={e => updateExistingPackCardQty(row, e.target.value)}
+                        style={{ width: 48, background: 'var(--bg-raised)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-primary)', fontSize: 12, textAlign: 'center', padding: '2px 4px' }}
+                      />
+                      <button
+                        onClick={() => removeExistingPackCard(row)}
+                        title="Remove from pack and inventory"
+                        style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '0 2px' }}
+                      >×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {/* ── Card picker ── */}
               <div style={{ background: 'var(--bg-void)', border: '1px solid var(--border)', borderRadius: 8, padding: '12px 14px', marginBottom: 12 }}>
