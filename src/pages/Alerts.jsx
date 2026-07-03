@@ -184,6 +184,11 @@ export default function Alerts({ onDismiss }) {
                               eBay ↗
                             </a>
                           )}
+                          {l.tcgplayer_id && (
+                            <a href={`https://www.tcgplayer.com/product/${l.tcgplayer_id}`} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: 'var(--text-secondary)', textDecoration: 'none', borderBottom: '1px dashed var(--border-mid)' }}>
+                              TCGPlayer ↗
+                            </a>
+                          )}
                         </div>
                       </td>
                       <td>
@@ -237,6 +242,11 @@ export default function Alerts({ onDismiss }) {
                         {l.ebay_url && (
                           <a href={l.ebay_url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: 'var(--text-secondary)', textDecoration: 'none', borderBottom: '1px dashed var(--border-mid)' }}>
                             eBay ↗
+                          </a>
+                        )}
+                        {l.tcgplayer_id && (
+                          <a href={`https://www.tcgplayer.com/product/${l.tcgplayer_id}`} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: 'var(--text-secondary)', textDecoration: 'none', borderBottom: '1px dashed var(--border-mid)' }}>
+                            TCGPlayer ↗
                           </a>
                         )}
                       </div>

@@ -249,6 +249,7 @@ CREATE OR REPLACE VIEW public.v_listing_price_alerts AS
     c.set_name,
     c.rarity,
     c.foil,
+    c.tcgplayer_id,
     (el.listed_price - COALESCE(el.shipping_cost, 5.00)) AS net_after_shipping,
     ((el.listed_price - COALESCE(el.shipping_cost, 5.00)) - lp.tcgplayer_market) AS price_gap,
     round((((el.listed_price - COALESCE(el.shipping_cost, 5.00) - lp.tcgplayer_market) / NULLIF(lp.tcgplayer_market, (0)::numeric)) * (100)::numeric), 1) AS overpriced_pct,
@@ -392,6 +393,7 @@ CREATE OR REPLACE VIEW public.v_stale_listings AS
     c.set_name,
     c.rarity,
     c.foil,
+    c.tcgplayer_id,
     lp.tcgplayer_market,
     (EXTRACT(day FROM (now() - el.listed_at)))::integer AS days_listed,
         CASE
