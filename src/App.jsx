@@ -6,7 +6,8 @@ import PublicNav from './components/PublicNav'
 import Dashboard from './pages/Dashboard'
 import Inventory from './pages/Inventory'
 import Alerts from './pages/Alerts'
-import Listings from './pages/Ebaylistings'
+import EbayListings from './pages/Ebaylistings'
+import TcgplayerListings from './pages/Tcgplayerlistings'
 import Boxes from './pages/Boxes'
 import Market from './pages/Market'
 import Settings from './pages/Settings'
@@ -104,7 +105,8 @@ export default function App() {
           <Route path="/dashboard"   element={<Dashboard />} />
           <Route path="/inventory"   element={<Inventory />} />
           <Route path="/alerts"      element={<Alerts onDismiss={() => setAlertCount(c => Math.max(0, c - 1))} />} />
-          <Route path="/listings"    element={<Listings />} />
+          <Route path="/listings"    element={<EbayListings />} />
+          <Route path="/tcgplayer"   element={<TcgplayerListings />} />
           <Route path="/boxes"       element={<Boxes />} />
           <Route path="/market"      element={<Market />} />
           <Route path="/youtube"     element={<YouTube />} />

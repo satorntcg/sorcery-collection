@@ -29,6 +29,7 @@ Pure client-side SPA: Vite + React 18 + react-router-dom v6, talking directly to
 | `/inventory` | `Inventory.jsx` | Card list with inline edit |
 | `/alerts` | `Alerts.jsx` | Price alert review + dismiss |
 | `/listings` | `Ebaylistings.jsx` | eBay listing CRUD (2-step modal) |
+| `/tcgplayer` | `Tcgplayerlistings.jsx` | TCGPlayer listing CRUD (2-step modal, 10.25% fee) |
 | `/suggestions` | `Listingsuggestions.jsx` | AI-powered lot grouping + eBay creation |
 | `/boxes` | `Boxes.jsx` | Sealed product P&L |
 | `/market` | `Market.jsx` | Manual price-check trigger |
@@ -36,8 +37,6 @@ Pure client-side SPA: Vite + React 18 + react-router-dom v6, talking directly to
 | `/import` | `Import.jsx` | Google Sheets bulk import |
 | `/settings` | `Settings.jsx` | `check_schedule` settings row |
 | `/rules` | `RulesChat.jsx` | RAG-based rulebook Q&A chatbot |
-
-**Dead file:** `src/pages/Listings.jsx` is an older, simpler listing view that is no longer imported. The active file is `src/pages/Ebaylistings.jsx`. Do not edit `Listings.jsx`.
 
 ### Supabase as the data layer
 
@@ -49,6 +48,8 @@ Tables referenced by the UI:
 - `price_alerts` — generated alerts: `card_id, alert_type, message, old_price, new_price, pct_change, dismissed`
 - `ebay_listings` — outbound listings: `card_id, title, listed_price, shipping_cost, condition, ebay_fee, net_listed, status, ebay_url, notes, cost_basis`; sold fields: `sold_price, sold_shipping, sold_ebay_fee, net_profit, sold_at`
 - `ebay_listing_cards` — junction for multi-card listings: `listing_id, card_id, price, quantity`
+- `tcgplayer_listings` — TCGPlayer channel listings, same shape/lifecycle as `ebay_listings` minus shipping: `card_id, title, listed_price, condition, quantity, tcg_fee, net_listed, status, tcgplayer_url, notes, cost_basis`; sold fields: `sold_price, sold_fee, net_profit, sold_at`. `tcg_fee`/`net_listed` are generated columns using a flat 10.25% commission (no separate payment-processing fee tracked)
+- `tcgplayer_listing_cards` — junction for multi-card TCGPlayer listings: `listing_id, card_id, price, quantity`
 - `boxes` — sealed product purchases: `name, set_name, set_code, box_type, purchase_price, pack_count, pack_msrp, purchased_at, opened_at, seller, notes, box_ref` (`box_ref` is a unique slug used for import linking)
 - `packs` — individual packs within a box: `box_id, pack_number, opened_at, notes, pack_ref` (`pack_ref` is a unique slug used for import linking)
 - `pack_cards` — cards recorded within each pack: `pack_id, card_id, quantity`
@@ -70,6 +71,8 @@ Views the UI reads from (heavier joins/aggregations live in Postgres, not the cl
 - `v_box_pnl` — boxes with `cards_market_value`, `gross_pnl`
 - `v_youtube_opening_summary` — openings joined with pack/card aggregates: `total_tcg_value`, `opening_pnl`, `packs_cost`, `packs_in_video`, `pack_msrp`, `pack_count`, `box_name`, `set_name`
 - `v_price_gainers_losers` — 7-day price movers per card: `card_id, name, rarity, foil, current_price, price_7d_ago, pct_change`
+- `v_tcgplayer_active` / `v_tcgplayer_sold` — active/sold TCGPlayer listings joined with card + lot info (mirrors `v_ebay_active`/`v_ebay_sold`)
+- `v_tcgplayer_pnl` — aggregate TCGPlayer revenue/fees/profit (mirrors `v_global_pnl`)
 
 When adding a feature that needs joined data, prefer creating/extending a view over composing joins in JS.
 
@@ -85,7 +88,11 @@ The pricing pipeline runs in Supabase, not the browser. The Market page can manu
 
 Groups unlisted elite/unique cards into eBay lots using a client-side algorithm (`groupCards`): uniques get solo listings, elite foils and non-foils are packed into lots of ≤ 6 cards targeting ≥ $20 total. After grouping, the "AI analyse lots" button calls the **Anthropic Messages API directly from the browser** (`https://api.anthropic.com/v1/messages`) using `VITE_ANTHROPIC_KEY`. Creating a listing writes to `ebay_listings` and `ebay_listing_cards`, then increments `quantity_listed` on each card.
 
-Fee constants in this file (`EBAY_FEE_PCT = 0.129`, `EBAY_FEE_FLAT = 0.30`, `DEFAULT_SHIP = 5.00`) are shared with `Ebaylistings.jsx` — if you change fee rates, update both files.
+Fee constants in this file (`EBAY_FEE_PCT = 0.129`, `EBAY_FEE_FLAT = 0.30`, `DEFAULT_SHIP = 5.00`) are shared with `Ebaylistings.jsx` — if you change fee rates, update both files. In `App.jsx` the eBay page is imported as `EbayListings` (not the generic `Listings`) to stay unambiguous now that `TcgplayerListings` also exists.
+
+### TCGPlayer Listings (Tcgplayerlistings.jsx)
+
+A second listing channel, structurally identical to `Ebaylistings.jsx` (2-step create modal, edit/sold/end/link/delete-sold modals) but backed by its own tables (`tcgplayer_listings`, `tcgplayer_listing_cards`) and views (`v_tcgplayer_active`, `v_tcgplayer_sold`, `v_tcgplayer_pnl`) rather than the eBay ones. Differences from the eBay page: no shipping field (TCGPlayer sellers typically fold shipping into the listed price), a flat `TCG_FEE_PCT = 0.1025` commission instead of eBay's fee formula, and a `tcgplayer_url` field instead of `ebay_url`. Marking a listing sold decrements the same `cards.quantity_owned`/`quantity_listed` columns eBay sales do, so inventory reflects both channels together — `quantity_listed` is not channel-specific.
 
 ### YouTube page (YouTube.jsx)
 

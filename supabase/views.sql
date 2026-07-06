@@ -138,6 +138,85 @@ CREATE OR REPLACE VIEW public.v_global_pnl AS
     count(*) AS total_listings
    FROM ebay_listings;
 
+CREATE OR REPLACE VIEW public.v_tcgplayer_active AS
+ SELECT tl.id,
+    tl.title,
+    tl.card_id,
+    tl.listed_price,
+    tl.condition,
+    tl.quantity,
+    tl.notes,
+    tl.tcgplayer_url,
+    tl.listed_at,
+    tl.status,
+    tl.cost_basis,
+    tl.tcg_fee,
+    tl.net_listed,
+    c.name AS card_name,
+    c.set_name,
+    c.rarity,
+    c.foil,
+    lp.tcgplayer_market AS tcg_market_price,
+    string_agg((c2.name ||
+        CASE
+            WHEN (tlc.quantity > 1) THEN (' ×'::text || tlc.quantity)
+            ELSE ''::text
+        END), ', '::text ORDER BY c2.name) AS all_card_names,
+    COALESCE(sum(tlc.quantity), (0)::bigint) AS card_count
+   FROM ((((tcgplayer_listings tl
+     LEFT JOIN cards c ON ((c.id = tl.card_id)))
+     LEFT JOIN v_latest_prices lp ON ((lp.card_id = tl.card_id)))
+     LEFT JOIN tcgplayer_listing_cards tlc ON ((tlc.listing_id = tl.id)))
+     LEFT JOIN cards c2 ON ((c2.id = tlc.card_id)))
+  WHERE (tl.status = 'active'::text)
+  GROUP BY tl.id, tl.title, tl.card_id, tl.listed_price, tl.condition, tl.quantity, tl.notes, tl.tcgplayer_url, tl.listed_at, tl.status, tl.cost_basis, tl.tcg_fee, tl.net_listed, c.name, c.set_name, c.rarity, c.foil, lp.tcgplayer_market;
+
+CREATE OR REPLACE VIEW public.v_tcgplayer_sold AS
+ SELECT tl.id,
+    tl.title,
+    tl.listed_price,
+    tl.quantity,
+    tl.sold_price,
+    tl.sold_fee,
+    tl.cost_basis,
+    tl.net_profit,
+    tl.sold_at,
+    tl.listed_at,
+    tl.condition,
+    tl.notes,
+    tl.tcgplayer_url,
+    tl.card_id,
+    (EXTRACT(day FROM (tl.sold_at - tl.listed_at)))::integer AS days_to_sell,
+    c.name AS card_name,
+    c.set_name,
+    c.rarity,
+    c.foil,
+    COALESCE(string_agg(DISTINCT lc_cards.name, ', '::text ORDER BY lc_cards.name) FILTER (WHERE (lc_cards.name IS NOT NULL)), c.name) AS all_card_names,
+    COALESCE(count(DISTINCT tlc.card_id) FILTER (WHERE (tlc.card_id IS NOT NULL)), (
+        CASE
+            WHEN (tl.card_id IS NOT NULL) THEN 1
+            ELSE 0
+        END)::bigint) AS card_count
+   FROM (((tcgplayer_listings tl
+     LEFT JOIN cards c ON ((c.id = tl.card_id)))
+     LEFT JOIN tcgplayer_listing_cards tlc ON ((tlc.listing_id = tl.id)))
+     LEFT JOIN cards lc_cards ON ((lc_cards.id = tlc.card_id)))
+  WHERE (tl.status = 'sold'::text)
+  GROUP BY tl.id, tl.title, tl.listed_price, tl.quantity, tl.sold_price, tl.sold_fee, tl.cost_basis, tl.net_profit, tl.sold_at, tl.listed_at, tl.condition, tl.notes, tl.tcgplayer_url, tl.card_id, c.name, c.set_name, c.rarity, c.foil
+  ORDER BY tl.sold_at DESC;
+
+CREATE OR REPLACE VIEW public.v_tcgplayer_pnl AS
+ SELECT COALESCE(sum(sold_price) FILTER (WHERE (status = 'sold'::text)), (0)::numeric) AS total_revenue,
+    COALESCE(sum(sold_fee) FILTER (WHERE (status = 'sold'::text)), (0)::numeric) AS total_tcg_fees,
+    COALESCE(sum(cost_basis) FILTER (WHERE (status = 'sold'::text)), (0)::numeric) AS total_cogs,
+    COALESCE(sum(net_profit) FILTER (WHERE (status = 'sold'::text)), (0)::numeric) AS total_net_profit,
+    count(*) FILTER (WHERE (status = 'active'::text)) AS active_listings_count,
+    COALESCE(sum(listed_price) FILTER (WHERE (status = 'active'::text)), (0)::numeric) AS active_listings_gmv,
+    COALESCE(sum(net_listed) FILTER (WHERE (status = 'active'::text)), (0)::numeric) AS active_listings_net_if_sold,
+    count(*) FILTER (WHERE (status = 'sold'::text)) AS total_sold,
+    count(*) AS total_listings
+   FROM tcgplayer_listings;
+
 CREATE OR REPLACE VIEW public.v_inventory_dashboard AS
  SELECT DISTINCT ON (c.id) c.id,
     c.name,

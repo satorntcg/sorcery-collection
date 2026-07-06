@@ -49,6 +49,9 @@ export default function Boxes() {
   const searchRef       = useRef(null)
   const justSelectedRef = useRef(false)
 
+  const [page, setPage] = useState(0)
+  const BOX_PAGE_SIZE = 20
+
   async function load() {
     setLoading(true)
     const { data } = await supabase
@@ -152,6 +155,10 @@ export default function Boxes() {
   const totalCost  = pnlBoxes.reduce((s, b) => s + Number(b.purchase_price || 0), 0)
   const totalValue = pnlBoxes.reduce((s, b) => s + Number(b.cards_market_value || 0), 0)
   const totalPnl   = totalValue - totalCost
+
+  const totalPages   = Math.ceil(boxes.length / BOX_PAGE_SIZE)
+  const safePage     = Math.min(page, Math.max(0, totalPages - 1))
+  const pagedBoxes   = boxes.slice(safePage * BOX_PAGE_SIZE, (safePage + 1) * BOX_PAGE_SIZE)
 
   const selectedBox = boxes.find(b => b.id === selected)
   const f = (field) => (e) => setForm(prev => ({ ...prev, [field]: e.target.value }))
@@ -402,7 +409,7 @@ export default function Boxes() {
                   </tr>
                 </thead>
                 <tbody>
-                  {boxes.map(box => (
+                  {pagedBoxes.map(box => (
                     <tr
                       key={box.id}
                       style={{
@@ -452,6 +459,17 @@ export default function Boxes() {
                   ))}
                 </tbody>
               </table>
+              {totalPages > 1 && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, padding: '12px 16px', borderTop: '1px solid var(--border)' }}>
+                  <button className="btn btn-ghost btn-sm" onClick={() => setPage(0)} disabled={safePage === 0}>«</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => setPage(p => Math.max(0, p - 1))} disabled={safePage === 0}>‹ Prev</button>
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                    Page {safePage + 1} of {totalPages} · {boxes.length} boxes
+                  </span>
+                  <button className="btn btn-ghost btn-sm" onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={safePage === totalPages - 1}>Next ›</button>
+                  <button className="btn btn-ghost btn-sm" onClick={() => setPage(totalPages - 1)} disabled={safePage === totalPages - 1}>»</button>
+                </div>
+              )}
             </div>
           )}
         </div>

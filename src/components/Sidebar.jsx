@@ -14,6 +14,7 @@ const NAV = [
     items: [
       { to: '/inventory',    label: 'Cards',               icon: <CardsIcon /> },
       { to: '/listings',     label: 'eBay Listings',       icon: <TagIcon /> },
+      { to: '/tcgplayer',    label: 'TCGPlayer Listings',  icon: <TcgIcon /> },
       { to: '/suggestions',  label: 'Listing Suggestions', icon: <SparkleIcon /> },
       { to: '/boxes',        label: 'Boxes & P&L',         icon: <BoxIcon /> },
       { to: '/boxev',        label: 'Box EV',              icon: <BoxEvIcon /> },
@@ -113,3 +114,4 @@ function UploadIcon()  { return <svg viewBox="0 0 24 24" fill="none" stroke="cur
 function YoutubeIcon() { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M22.54 6.42a2.78 2.78 0 00-1.95-1.96C18.88 4 12 4 12 4s-6.88 0-8.59.46A2.78 2.78 0 001.46 6.42 29 29 0 001 12a29 29 0 00.46 5.58A2.78 2.78 0 003.41 19.6C5.12 20 12 20 12 20s6.88 0 8.59-.46a2.78 2.78 0 001.95-1.95A29 29 0 0023 12a29 29 0 00-.46-5.58z"/><polygon points="9.75 15.02 15.5 12 9.75 8.98 9.75 15.02" fill="currentColor" stroke="none"/></svg> }
 function BookIcon()  { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/></svg> }
 function BoxEvIcon() { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg> }
+function TcgIcon()  { return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><circle cx="12" cy="12" r="10"/><path d="M8 12h8M12 8v8"/></svg> }
