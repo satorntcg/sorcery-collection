@@ -65,9 +65,9 @@ export default function App() {
     if (!session) return
     async function fetchAlertCount() {
       const { count } = await supabase
-        .from('price_alerts')
+        .from('v_active_alerts')
         .select('*', { count: 'exact', head: true })
-        .eq('dismissed', false)
+        .gte('new_price', 1)
       setAlertCount(count ?? 0)
     }
     fetchAlertCount()
