@@ -143,6 +143,8 @@ export default function Inventory() {
   const [expanded, setExpanded]          = useState(new Set())
   const [selectedIds, setSelectedIds]    = useState(new Set())
   const [page, setPage]                  = useState(0)
+  const [sortField, setSortField]        = useState('name')
+  const [sortDir, setSortDir]            = useState('asc')
   const PAGE_SIZE = 100
 
   async function load() {
@@ -193,7 +195,7 @@ export default function Inventory() {
 
   const sets = [...new Set(cards.map(c => c.set_name).filter(Boolean))].sort()
 
-  useEffect(() => { setPage(0) }, [search, inStockOnly, rarityFilter, setFilter, foilFilter])
+  useEffect(() => { setPage(0) }, [search, inStockOnly, rarityFilter, setFilter, foilFilter, sortField, sortDir])
 
   const filtered = cards.filter(c => {
     const matchSearch = c.name?.toLowerCase().includes(search.toLowerCase()) ||
@@ -209,9 +211,43 @@ export default function Inventory() {
   const totalValueUnit = filtered.filter(c => (c.quantity_owned ?? 0) > 0).reduce((sum, c) => sum + (c.tcgplayer_market ?? 0), 0)
   const totalCost      = filtered.reduce((sum, c) => sum + ((c.cost_basis ?? 0) * (c.quantity_owned ?? 1)), 0)
 
-  const totalPages = Math.ceil(filtered.length / PAGE_SIZE)
+  const SORT_ACCESSORS = {
+    name:            c => c.name?.toLowerCase() ?? '',
+    rarity:          c => RARITIES.indexOf(c.rarity),
+    condition:       c => CONDITIONS.indexOf(c.condition),
+    quantity_owned:  c => c.quantity_owned ?? 0,
+    cost_basis:      c => c.cost_basis ?? -Infinity,
+    tcgplayer_market: c => c.tcgplayer_market ?? -Infinity,
+    ebay_sold_avg:   c => c.ebay_sold_avg ?? -Infinity,
+    market_value:    c => c.market_value ?? -Infinity,
+    unrealized_pnl:  c => c.unrealized_pnl ?? -Infinity,
+  }
+
+  function handleSort(field) {
+    if (sortField === field) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortField(field)
+      setSortDir('asc')
+    }
+  }
+
+  function sortArrow(field) {
+    if (sortField !== field) return null
+    return <span style={{ marginLeft: 4 }}>{sortDir === 'asc' ? '▲' : '▼'}</span>
+  }
+
+  const accessor = SORT_ACCESSORS[sortField] ?? SORT_ACCESSORS.name
+  const sorted = [...filtered].sort((a, b) => {
+    const av = accessor(a), bv = accessor(b)
+    if (av < bv) return sortDir === 'asc' ? -1 : 1
+    if (av > bv) return sortDir === 'asc' ? 1 : -1
+    return 0
+  })
+
+  const totalPages = Math.ceil(sorted.length / PAGE_SIZE)
   const safePage   = Math.min(page, Math.max(0, totalPages - 1))
-  const paginated  = filtered.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE)
+  const paginated  = sorted.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE)
 
   function openAdd() {
     setForm(BLANK)
@@ -462,15 +498,15 @@ export default function Inventory() {
                     title={allFilteredSelected ? 'Deselect all filtered' : 'Select all filtered'}
                   />
                 </th>
-                <th>Card</th>
-                <th>Rarity</th>
-                <th>Condition</th>
-                <th className="text-right">Qty</th>
-                <th className="text-right">Cost basis</th>
-                <th className="text-right">TCGPlayer</th>
-                <th className="text-right">eBay avg</th>
-                <th className="text-right">Market value</th>
-                <th className="text-right">P&L</th>
+                <th onClick={() => handleSort('name')} style={{ cursor: 'pointer', userSelect: 'none' }}>Card{sortArrow('name')}</th>
+                <th onClick={() => handleSort('rarity')} style={{ cursor: 'pointer', userSelect: 'none' }}>Rarity{sortArrow('rarity')}</th>
+                <th onClick={() => handleSort('condition')} style={{ cursor: 'pointer', userSelect: 'none' }}>Condition{sortArrow('condition')}</th>
+                <th className="text-right" onClick={() => handleSort('quantity_owned')} style={{ cursor: 'pointer', userSelect: 'none' }}>Qty{sortArrow('quantity_owned')}</th>
+                <th className="text-right" onClick={() => handleSort('cost_basis')} style={{ cursor: 'pointer', userSelect: 'none' }}>Cost basis{sortArrow('cost_basis')}</th>
+                <th className="text-right" onClick={() => handleSort('tcgplayer_market')} style={{ cursor: 'pointer', userSelect: 'none' }}>TCGPlayer{sortArrow('tcgplayer_market')}</th>
+                <th className="text-right" onClick={() => handleSort('ebay_sold_avg')} style={{ cursor: 'pointer', userSelect: 'none' }}>eBay avg{sortArrow('ebay_sold_avg')}</th>
+                <th className="text-right" onClick={() => handleSort('market_value')} style={{ cursor: 'pointer', userSelect: 'none' }}>Market value{sortArrow('market_value')}</th>
+                <th className="text-right" onClick={() => handleSort('unrealized_pnl')} style={{ cursor: 'pointer', userSelect: 'none' }}>P&L{sortArrow('unrealized_pnl')}</th>
                 <th></th>
               </tr>
             </thead>
