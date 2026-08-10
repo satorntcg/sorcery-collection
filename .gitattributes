@@ -1,0 +1,4 @@
+# Shell scripts must keep LF line endings regardless of core.autocrlf —
+# a CRLF-mangled shebang line silently breaks the script on execution.
+.githooks/* text eol=lf
+*.sh text eol=lf
