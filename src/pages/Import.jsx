@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { useGame } from '../context/GameContext'
+import { gameConfig } from '../lib/games'
 
 function getSheetUrls(url, listingsGid) {
   const pubIdMatch = url.match(/\/d\/e\/([^/]+)/)
@@ -28,17 +30,12 @@ function parseCsv(text) {
   }).filter(row => Object.values(row).some(v => v !== ''))
 }
 
-const RARITY_MAP = {
-  'ordinary':'ordinary','o':'ordinary','exceptional':'exceptional','e':'exceptional',
-  'elite':'elite','el':'elite','unique':'unique','u':'unique',
-}
-
-function normalizeCard(row) {
+function normalizeCard(row, config) {
   return {
     name:         row.name?.trim(),
-    set_name:     (row.set_name ?? row.set ?? 'Gothic').trim(),
+    set_name:     (row.set_name ?? row.set ?? config.defaultSet).trim(),
     set_code:     row.set_code?.trim() || null,
-    rarity:       RARITY_MAP[row.rarity?.toLowerCase().trim()] ?? 'elite',
+    rarity:       config.rarityMap[row.rarity?.toLowerCase().trim()] ?? config.defaultRarity,
     condition:    'near_mint',
     foil:         ['true','yes','1','foil'].includes(row.foil?.toLowerCase().trim()),
     tcgplayer_id: row.tcgplayer_id?.trim() || null,
@@ -49,12 +46,12 @@ function normalizeCard(row) {
   }
 }
 
-async function runImport(cardRows, onLog) {
+async function runImport(cardRows, onLog, config, gameId) {
   let cardCount = 0, updatedCount = 0, skipped = 0, errorCount = 0
   const packIdCache = {}
 
   for (const raw of cardRows) {
-    const card = normalizeCard(raw)
+    const card = normalizeCard(raw, config)
     const packRef = card._pack_ref
     const boxRef  = card._box_ref
     delete card._pack_ref
@@ -113,12 +110,12 @@ async function runImport(cardRows, onLog) {
     let existing = null
     if (card.tcgplayer_id) {
       const { data } = await supabase.from('cards').select('id, quantity_owned')
-        .eq('tcgplayer_id', card.tcgplayer_id).maybeSingle()
+        .eq('tcgplayer_id', card.tcgplayer_id).eq('game_id', gameId).maybeSingle()
       existing = data
     }
     if (!existing) {
       const { data } = await supabase.from('cards').select('id, quantity_owned')
-        .ilike('name', card.name).ilike('set_name', card.set_name).eq('condition', card.condition).eq('foil', card.foil).maybeSingle()
+        .ilike('name', card.name).ilike('set_name', card.set_name).eq('condition', card.condition).eq('foil', card.foil).eq('game_id', gameId).maybeSingle()
       existing = data
     }
 
@@ -139,7 +136,7 @@ async function runImport(cardRows, onLog) {
       onLog('info', `Linked: ${card.name} → ${packRef ?? 'no pack'}`)
       updatedCount++
     } else {
-      const { data, error } = await supabase.from('cards').insert({ ...card, quantity_owned: 1 }).select('id').single()
+      const { data, error } = await supabase.from('cards').insert({ ...card, quantity_owned: 1, game_id: gameId }).select('id').single()
       if (error) { onLog('error', `Card (${card.name}): ${error.message}`); errorCount++; continue }
       cardId = data.id
       onLog('success', `Added: ${card.name} (${card.rarity})`)
@@ -156,7 +153,7 @@ async function runImport(cardRows, onLog) {
   return { cardCount, updatedCount, skipped, errorCount }
 }
 
-async function runListingsImport(listingRows, onLog) {
+async function runListingsImport(listingRows, onLog, gameId, config) {
   let created = 0, skipped = 0, errorCount = 0
 
   // Group rows by listing_ref
@@ -199,7 +196,7 @@ async function runListingsImport(listingRows, onLog) {
       if (!name) continue
       const foilVal = row.foil?.trim().toLowerCase()
       const isFoil = ['true','yes','1','foil'].includes(foilVal)
-      let query = supabase.from('cards').select('id, name').ilike('name', name).eq('foil', isFoil)
+      let query = supabase.from('cards').select('id, name').ilike('name', name).eq('foil', isFoil).eq('game_id', gameId)
       if (setName) query = query.ilike('set_name', setName)
       const { data: match } = await query.maybeSingle()
       if (match) { cardIds.push(match.id); cardBreakdown.push(match.name) }
@@ -221,10 +218,10 @@ async function runListingsImport(listingRows, onLog) {
     }
 
     const title = cardBreakdown.length === 1
-      ? `${cardBreakdown[0]} — Sorcery TCG`
+      ? `${cardBreakdown[0]} — ${config.displayName}`
       : cardBreakdown.length > 1
-        ? `Sorcery TCG Lot — ${cardBreakdown.join(', ')}`
-        : `Sorcery TCG Lot (${ref})`
+        ? `${config.displayName} Lot — ${cardBreakdown.join(', ')}`
+        : `${config.displayName} Lot (${ref})`
 
     const fullNotes = [
       cardBreakdown.length > 1 ? `Cards: ${cardBreakdown.join(', ')}` : null,
@@ -282,6 +279,9 @@ async function runListingsImport(listingRows, onLog) {
 }
 
 export default function Import() {
+  const { activeGame, games } = useGame()
+  const [importGame, setImportGame] = useState(activeGame)
+  const importConfig = gameConfig(importGame.slug)
   const [sheetUrl, setSheetUrl]     = useState('https://docs.google.com/spreadsheets/d/e/2PACX-1vTgjSY3ZKa5WFKauWOjlVQfuKCqhQD3p2c485h1jMV_iP8oatHLc_lQn3_4dGDO66VagE2hcTbGZWQ5/pub?output=csv')
   const [listingsGid, setListingsGid] = useState('1267977612')
   const [status, setStatus]         = useState('idle')
@@ -333,14 +333,14 @@ export default function Import() {
   async function doImport() {
     if (!preview) return
     setStatus('importing'); setLogs([])
-    const result = await runImport(preview.cards, addLog)
+    const result = await runImport(preview.cards, addLog, importConfig, importGame.id)
     setSummary(result); setStatus('done')
   }
 
   async function doListingsImport() {
     if (!listingPreview) return
     setStatus('importing'); setLogs([])
-    const result = await runListingsImport(listingPreview, addLog)
+    const result = await runListingsImport(listingPreview, addLog, importGame.id, importConfig)
     setListingSummary(result); setStatus('done')
   }
 
@@ -367,11 +367,24 @@ export default function Import() {
       </div>
 
       {/* Tab selector */}
-      <div style={{ display: 'flex', gap: 4, marginBottom: 20 }}>
+      <div style={{ display: 'flex', gap: 4, marginBottom: 20, alignItems: 'center', flexWrap: 'wrap' }}>
         {[['cards', 'Cards'], ['listings', 'eBay Listings'], ['ebay_csv', 'eBay Order History']].map(([id, label]) => (
           <button key={id} className={`btn btn-sm ${activeTab === id ? 'btn-primary' : 'btn-ghost'}`}
             onClick={() => setActiveTab(id)}>{label}</button>
         ))}
+        {games.length > 1 && (
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Importing into</span>
+            <select
+              className="form-select"
+              style={{ fontSize: 12, width: 'auto' }}
+              value={importGame.id}
+              onChange={e => setImportGame(games.find(g => g.id === e.target.value))}
+            >
+              {games.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}
+            </select>
+          </div>
+        )}
       </div>
 
       {/* ── Cards / Boxes / Packs tab ── */}
@@ -419,7 +432,7 @@ export default function Import() {
                 </tr></thead>
                 <tbody>
                   {preview.cards.slice(0, 20).map((row, i) => {
-                    const c = normalizeCard(row)
+                    const c = normalizeCard(row, importConfig)
                     return (
                       <tr key={i}>
                         <td className="name-cell">{c.name || <span className="text-danger">missing!</span>}</td>
@@ -758,12 +771,12 @@ export default function Import() {
                         if (tcgId) {
                           const { data: cardMatch } = await supabase
                             .from('cards').select('id, quantity_owned, quantity_listed')
-                            .eq('tcgplayer_id', tcgId).maybeSingle()
+                            .eq('tcgplayer_id', tcgId).eq('game_id', importGame.id).maybeSingle()
                           if (cardMatch) matchedCardId = cardMatch
                         } else if (cardName) {
                           const { data: cardMatch } = await supabase
                             .from('cards').select('id, quantity_owned, quantity_listed')
-                            .ilike('name', cardName).maybeSingle()
+                            .ilike('name', cardName).eq('game_id', importGame.id).maybeSingle()
                           if (cardMatch) matchedCardId = cardMatch
                         }
 
@@ -917,10 +930,10 @@ export default function Import() {
                       const cardName = row.card_name?.trim()
 
                       if (tcgId) {
-                        const { data: m } = await supabase.from('cards').select('id, quantity_listed').eq('tcgplayer_id', tcgId).maybeSingle()
+                        const { data: m } = await supabase.from('cards').select('id, quantity_listed').eq('tcgplayer_id', tcgId).eq('game_id', importGame.id).maybeSingle()
                         if (m) matchedCard = m
                       } else if (cardName) {
-                        const { data: m } = await supabase.from('cards').select('id, quantity_listed').ilike('name', cardName).maybeSingle()
+                        const { data: m } = await supabase.from('cards').select('id, quantity_listed').ilike('name', cardName).eq('game_id', importGame.id).maybeSingle()
                         if (m) matchedCard = m
                       }
 

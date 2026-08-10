@@ -37,20 +37,22 @@ Pure client-side SPA: Vite + React 18 + react-router-dom v6, talking directly to
 | `/import` | `Import.jsx` | Google Sheets bulk import |
 | `/settings` | `Settings.jsx` | `check_schedule` settings row |
 | `/rules` | `RulesChat.jsx` | RAG-based rulebook Q&A chatbot |
+| `/boxev` | `BoxEV.jsx` | Box/pack expected-value analytics (read-only) |
 
 ### Supabase as the data layer
 
 `src/lib/supabase.js` exports a single shared `supabase` client. Pages call it directly with `supabase.from(...)` — there is no repository/service abstraction. When changing data flow, grep page files for the relevant table/view name.
 
 Tables referenced by the UI:
-- `cards` — primary inventory: `name, set_name, set_code, rarity, condition, foil, quantity_owned, quantity_listed, cost_basis, image_url, tcgplayer_id, notes` (`quantity_available` and `active_listing_count` are view-only — read from `v_inventory_dashboard`, not this table)
+- `games` — the games tracked by the app (Sorcery, Riftbound, ...): `name, slug, is_active, sort_order`. Root FK target for `cards.game_id` / `boxes.game_id`. See "Multi-game support" below.
+- `cards` — primary inventory: `name, set_name, set_code, rarity, condition, foil, card_type, cost_basis, quantity_owned, quantity_listed, image_url, tcgplayer_id, notes, game_id` (`quantity_available` and `active_listing_count` are view-only — read from `v_inventory_dashboard`, not this table). `card_type` and `cost_basis` are real columns despite not appearing in older schema dumps.
 - `price_snapshots` — historical prices: `card_id, tcgplayer_low, tcgplayer_mid, tcgplayer_market, ebay_sold_avg, ebay_sold_low, ebay_sold_high`
 - `price_alerts` — generated alerts: `card_id, alert_type, message, old_price, new_price, pct_change, dismissed`
 - `ebay_listings` — outbound listings: `card_id, title, listed_price, shipping_cost, condition, ebay_fee, net_listed, status, ebay_url, notes, cost_basis`; sold fields: `sold_price, sold_shipping, sold_ebay_fee, net_profit, sold_at`
 - `ebay_listing_cards` — junction for multi-card listings: `listing_id, card_id, price, quantity`
 - `tcgplayer_listings` — TCGPlayer channel listings, same shape/lifecycle as `ebay_listings`: `card_id, title, listed_price, shipping_cost, condition, quantity, tcg_fee, net_listed, status, tcgplayer_url, notes, cost_basis`; sold fields: `sold_price, sold_shipping, sold_fee, net_profit, sold_at`. `tcg_fee`/`net_listed` are generated columns using a flat 10.25% commission minus `shipping_cost` (no separate payment-processing fee tracked). `shipping_cost` defaults to `$5.00`
 - `tcgplayer_listing_cards` — junction for multi-card TCGPlayer listings: `listing_id, card_id, price, quantity`
-- `boxes` — sealed product purchases: `name, set_name, set_code, box_type, purchase_price, pack_count, pack_msrp, purchased_at, opened_at, seller, notes, box_ref` (`box_ref` is a unique slug used for import linking)
+- `boxes` — sealed product purchases: `name, set_name, set_code, box_type, purchase_price, pack_count, pack_msrp, purchased_at, opened_at, seller, notes, box_ref, game_id` (`box_ref` is a unique slug used for import linking)
 - `packs` — individual packs within a box: `box_id, pack_number, opened_at, notes, pack_ref` (`pack_ref` is a unique slug used for import linking)
 - `pack_cards` — cards recorded within each pack: `pack_id, card_id, quantity`
 - `youtube_openings` — video opening records: `id, title, box_id, youtube_url, filmed_at`
@@ -59,8 +61,8 @@ Tables referenced by the UI:
 - `document_chunks` — rulebook embeddings for RAG: `source, source_id, content, embedding (vector), metadata (jsonb)` — queried via the `match_documents` RPC, not directly
 
 Enums used in inserts (must match the DB):
-- rarity: `ordinary | exceptional | elite | unique`
-- condition: `near_mint | lightly_played | moderately_played | heavily_played | damaged`
+- rarity: **not an enum** — `cards.rarity` is `text`, validated only at the app layer via `GAME_CONFIG[game.slug].rarities` in `src/lib/games.js` (Sorcery: `ordinary | exceptional | elite | unique`; Riftbound: `common | uncommon | rare | epic | overnumbered`). This changed from a Postgres enum in the 2026-08-10 multi-game migration since rarity vocabulary differs per game.
+- condition: `near_mint | lightly_played | moderately_played | heavily_played | damaged` (still a real Postgres enum — shared across all games, grading terminology is a universal TCG standard)
 - box_type: `booster_box | single_booster | prerelease_kit | bundle | other`
 - listing status: `active | sold | ended | cancelled`
 
@@ -77,6 +79,20 @@ Views the UI reads from (heavier joins/aggregations live in Postgres, not the cl
 
 When adding a feature that needs joined data, prefer creating/extending a view over composing joins in JS.
 
+Most app-facing views above also expose a `game_id` column (added in the 2026-08-10 multi-game migration) so pages can `.eq('game_id', activeGame.id)`. Exceptions that stay all-games-combined on purpose: `v_global_pnl`, `v_tcgplayer_pnl`, `v_combined_pnl`. For `v_ebay_active`/`v_ebay_sold`/`v_tcgplayer_active`/`v_tcgplayer_sold`, `game_id` is `COALESCE(c.game_id, max(<junction cards>.game_id))` rather than a plain column, because multi-card lot listings have no single `card_id` to read it from directly.
+
+### Multi-game support
+
+The app tracks multiple TCGs (Sorcery, Riftbound, more later) in one shared schema. `cards` and `boxes` — the two root entities everything else joins through — carry a `game_id` FK into the `games` table; every other table (`price_snapshots`, `ebay_listings`, `tcgplayer_listings`, `packs`, `pack_cards`, `youtube_openings`, junctions) is scoped transitively via `card_id`/`box_id`, not its own `game_id` column.
+
+- **`src/context/GameContext.jsx`** — `GameProvider` (wraps the private app shell in `App.jsx`, inside `PrivateLayout`) fetches `games` once, tracks `activeGame` (persisted to `localStorage`), and exposes `useGame()` → `{ games, activeGame, setActiveGame }`. Public routes (`Home.jsx`, `PublicCards.jsx`, `CardDetail.jsx`, `RulesChat.jsx`) render outside this provider and are **not** game-scoped — they only ever show Sorcery data today.
+- **`src/lib/games.js`** — `GAME_CONFIG[slug]` is the single source of per-game vocabulary: `rarities`, `cardTypes`, `sets`, `defaultSet`/`defaultRarity`, `tcgplayerSlug` (for building TCGPlayer search links), `fillerCardValue` (BoxEV's flat per-pack filler-card estimate), `rarityMap` (Import.jsx normalization), and `grouping` (Listing Suggestions tier config: `eligibleRarities`, `soloRarities`, `secondaryRarity`, `pooledSpecialType`/`pooledSpecialLabel`). Adding a new game = one row in `games` (via SQL) + one entry here.
+- **`Sidebar.jsx`** renders a game switcher (`<select>`) when more than one game is active.
+- Every scoped page follows the same pattern: table/view queries gain `.eq('game_id', activeGame.id)`, insert payloads gain `game_id: activeGame.id`, and hard-coded rarity/set/card-type dropdown arrays are replaced by `gameConfig(activeGame.slug)` lookups.
+- `check_schedule` (price-check cadence/alert thresholds), `v_combined_pnl`/`v_global_pnl`/`v_tcgplayer_pnl` (channel P&L), and the sidebar's alert-count badge are deliberately **not** game-scoped — they stay whole-account totals.
+- `daily_price_check` needs no game awareness — it prices every card by `tcgplayer_id` regardless of game.
+- Migration: `supabase/migrations/20260810_multi_game_support.sql`.
+
 ### Realtime
 
 `src/App.jsx` subscribes to `postgres_changes` on `price_alerts` to keep the sidebar badge live. Other pages re-fetch on mount; only the alert badge uses realtime.
@@ -87,7 +103,7 @@ The pricing pipeline runs in Supabase, not the browser. The Market page can manu
 
 ### Listing Suggestions + AI (Listingsuggestions.jsx)
 
-Groups unlisted elite/unique cards into eBay lots using a client-side algorithm (`groupCards`): uniques get solo listings, elite foils and non-foils are packed into lots of ≤ 6 cards targeting ≥ $20 total. After grouping, the "AI analyse lots" button calls the **Anthropic Messages API directly from the browser** (`https://api.anthropic.com/v1/messages`) using `VITE_ANTHROPIC_KEY`. Creating a listing writes to `ebay_listings` and `ebay_listing_cards`, then increments `quantity_listed` on each card.
+Groups unlisted high-rarity cards into eBay lots using a client-side algorithm (`groupCards(cards, config)`), driven by the active game's `GAME_CONFIG[...].grouping` (see "Multi-game support"): `soloRarities` get their own foil/non-foil lots, `secondaryRarity` gets one more non-foil tier, `pooledSpecialType` (e.g. Sorcery's "site" cards) always pools regardless of rarity, and everything packs into lots of ≤ 6 cards targeting ≥ $20 total. After grouping, the "AI analyse lots" button calls the **Anthropic Messages API directly from the browser** (`https://api.anthropic.com/v1/messages`) using `VITE_ANTHROPIC_KEY`. Creating a listing writes to `ebay_listings` and `ebay_listing_cards`, then increments `quantity_listed` on each card.
 
 Fee constants in this file (`EBAY_FEE_PCT = 0.129`, `EBAY_FEE_FLAT = 0.30`, `DEFAULT_SHIP = 5.00`) are shared with `Ebaylistings.jsx` — if you change fee rates, update both files. In `App.jsx` the eBay page is imported as `EbayListings` (not the generic `Listings`) to stay unambiguous now that `TcgplayerListings` also exists.
 
@@ -101,7 +117,7 @@ Tracks pack-by-pack openings filmed for YouTube. An opening links a set of `pack
 
 ### Bulk import (Import.jsx)
 
-Imports cards + boxes from a published Google Sheet (`/pub` or `/spreadsheets/d/...` URLs are both parsed). Expects exact tab names `Cards` and `Boxes`. CSV is fetched client-side and parsed with a small hand-rolled parser that handles quoted commas. Rarity/condition/box_type free-text values are normalized through `RARITY_MAP`/`CONDITION_MAP`/`BOX_TYPE_MAP` before insert. Cards are matched for upsert on `(name, set_name, condition)`. Cards reference their originating box via a `box_ref` column in the sheet which is resolved to the inserted box's UUID at import time (sheet-only concept, not a DB column).
+Imports cards + boxes from a published Google Sheet (`/pub` or `/spreadsheets/d/...` URLs are both parsed). Expects exact tab names `Cards` and `Boxes`. CSV is fetched client-side and parsed with a small hand-rolled parser that handles quoted commas. Rarity free-text values are normalized through the active import game's `GAME_CONFIG[...].rarityMap` (a "Importing into" game selector, defaulting to the sidebar's active game, sits above the tab bar); condition is fixed to `near_mint` on import. Cards are matched for upsert on `(name, set_name, condition, game_id)`. Cards reference their originating box via a `box_ref` column in the sheet which is resolved to the inserted box's UUID at import time (sheet-only concept, not a DB column).
 
 ### WeeklyMovers component
 

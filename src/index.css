@@ -239,6 +239,12 @@ html, body, #root {
 .badge-elite   { background: rgba(76,132,201,0.12); color: #7AADEC; border: 1px solid rgba(76,132,201,0.3); }
 .badge-exceptional { background: rgba(76,175,110,0.12); color: #7ACFA0; border: 1px solid rgba(76,175,110,0.3); }
 .badge-ordinary { background: var(--bg-raised); color: var(--text-muted); border: 1px solid var(--border); }
+/* Riftbound rarities, mapped onto the same muted→gold tier progression as above */
+.badge-overnumbered { background: rgba(201,168,76,0.15); color: var(--gold-light); border: 1px solid var(--gold-dim); }
+.badge-epic    { background: rgba(76,132,201,0.12); color: #7AADEC; border: 1px solid rgba(76,132,201,0.3); }
+.badge-rare    { background: rgba(76,175,110,0.12); color: #7ACFA0; border: 1px solid rgba(76,175,110,0.3); }
+.badge-uncommon { background: var(--bg-raised); color: var(--text-secondary); border: 1px solid var(--border); }
+.badge-common  { background: var(--bg-raised); color: var(--text-muted); border: 1px solid var(--border); }
 .badge-alert   { background: var(--warning-bg); color: var(--warning); border: 1px solid rgba(201,137,76,0.3); }
 .badge-ok      { background: var(--success-bg); color: var(--success); border: 1px solid rgba(76,175,110,0.3); }
 .badge-danger  { background: var(--danger-bg); color: var(--danger); border: 1px solid rgba(201,76,76,0.3); }

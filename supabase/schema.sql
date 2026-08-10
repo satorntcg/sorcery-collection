@@ -347,15 +347,9 @@ ALTER TYPE public.card_condition OWNER TO postgres;
 -- Name: card_rarity; Type: TYPE; Schema: public; Owner: postgres
 --
 
-CREATE TYPE public.card_rarity AS ENUM (
-    'ordinary',
-    'exceptional',
-    'elite',
-    'unique'
-);
-
-
-ALTER TYPE public.card_rarity OWNER TO postgres;
+-- card_rarity enum dropped 2026-08-10 (multi-game support migration):
+-- cards.rarity is now `text` since rarity vocabulary differs per game
+-- (see supabase/migrations/20260810_multi_game_support.sql).
 
 --
 -- Name: listing_status; Type: TYPE; Schema: public; Owner: postgres
@@ -3444,7 +3438,8 @@ CREATE TABLE public.boxes (
     opened_at timestamp with time zone,
     seller text,
     notes text,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    game_id uuid NOT NULL REFERENCES public.games(id)
 );
 
 
@@ -3480,7 +3475,7 @@ CREATE TABLE public.cards (
     name text NOT NULL,
     set_name text NOT NULL,
     set_code text,
-    rarity public.card_rarity NOT NULL,
+    rarity text NOT NULL,
     condition public.card_condition DEFAULT 'near_mint'::public.card_condition NOT NULL,
     foil boolean DEFAULT false NOT NULL,
     tcgplayer_id text,
@@ -3490,6 +3485,12 @@ CREATE TABLE public.cards (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     quantity_owned integer DEFAULT 0 NOT NULL,
     quantity_listed integer DEFAULT 0 NOT NULL,
+    -- card_type/cost_basis confirmed present on the live table (src/pages/Inventory.jsx
+    -- insert payload) but were missing from this dump before 2026-08-10 — added here for
+    -- accuracy, not part of the multi-game migration itself.
+    card_type text,
+    cost_basis numeric(10,2),
+    game_id uuid NOT NULL REFERENCES public.games(id),
     CONSTRAINT cards_quantity_listed_check CHECK ((quantity_listed >= 0)),
     CONSTRAINT cards_quantity_owned_check CHECK ((quantity_owned >= 0))
 );
@@ -3554,6 +3555,31 @@ CREATE TABLE public.ebay_listings (
 
 
 ALTER TABLE public.ebay_listings OWNER TO postgres;
+
+--
+-- Name: games; Type: TABLE; Schema: public; Owner: postgres
+--
+-- Added 2026-08-10 (multi-game support). RLS policy/grants/trigger for this
+-- table are defined in supabase/migrations/20260810_multi_game_support.sql,
+-- not duplicated here — this dump doesn't consistently carry RLS policies
+-- for other tables either (e.g. cards' "public read" policy, added later
+-- via the SQL editor per supabase/views.sql's header note, isn't here).
+
+CREATE TABLE public.games (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    name text NOT NULL,
+    slug text NOT NULL,
+    is_active boolean DEFAULT true NOT NULL,
+    sort_order integer DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT games_slug_key UNIQUE (slug)
+);
+
+
+ALTER TABLE public.games OWNER TO postgres;
+
+COMMENT ON TABLE public.games IS 'Games tracked by the app (Sorcery, Riftbound, ...). Root FK target for cards.game_id / boxes.game_id.';
 
 --
 -- Name: pack_cards; Type: TABLE; Schema: public; Owner: postgres

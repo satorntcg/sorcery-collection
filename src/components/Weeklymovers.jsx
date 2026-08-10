@@ -15,16 +15,20 @@ function weekRange() {
   return `${fmt(start)} – ${fmt(end)}, ${year}`
 }
 
-export default function WeeklyMovers({ publicLinks = false, onSelect }) {
+// gameId/defaultSet are optional so this component still works unscoped on the public
+// Home page (which renders outside GameProvider and stays Sorcery-only for now).
+export default function WeeklyMovers({ publicLinks = false, onSelect, gameId, defaultSet = 'Gothic' }) {
   const [movers, setMovers]     = useState([])
   const [loading, setLoading]   = useState(true)
   const [foilFilter, setFoil]   = useState('nonfoil')
-  const [setFilter, setSetFilter] = useState('Gothic')
+  const [setFilter, setSetFilter] = useState(defaultSet)
   const navigate = useNavigate()
   const cardRef  = useRef(null)
 
   useEffect(() => {
-    supabase.from('v_price_gainers_losers').select('*').then(async ({ data }) => {
+    let query = supabase.from('v_price_gainers_losers').select('*')
+    if (gameId) query = query.eq('game_id', gameId)
+    query.then(async ({ data }) => {
       const rows = data ?? []
       if (rows.length > 0) {
         const ids = rows.map(r => r.card_id)
@@ -36,7 +40,7 @@ export default function WeeklyMovers({ publicLinks = false, onSelect }) {
       }
       setLoading(false)
     })
-  }, [])
+  }, [gameId])
 
   if (loading) return null
 

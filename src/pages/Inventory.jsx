@@ -1,16 +1,15 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { useGame } from '../context/GameContext'
+import { gameConfig } from '../lib/games'
 
 const usd = (n) => n != null ? `$${Number(n).toFixed(2)}` : '—'
 
-const RARITIES   = ['ordinary', 'exceptional', 'elite', 'unique']
 const CONDITIONS = ['near_mint', 'lightly_played', 'moderately_played', 'heavily_played', 'damaged']
-const SETS       = ['Alpha', 'Beta', 'Arthurian Legends', 'Gothic', 'Other']
-const CARD_TYPES = ['site', 'minion', 'magic', 'artifact', 'avatar']
 
 const BLANK = {
-  name: '', set_name: 'Gothic', set_code: '', rarity: 'elite',
+  name: '', set_name: '', set_code: '', rarity: '',
   condition: 'near_mint', foil: false, quantity_owned: 1,
   cost_basis: '', image_url: '', tcgplayer_id: '', notes: '', card_type: '',
 }
@@ -54,7 +53,7 @@ function exportInventoryCSV(cards) {
   URL.revokeObjectURL(url)
 }
 
-function exportTCGPlayerCSV(cards) {
+function exportTCGPlayerCSV(cards, productLine) {
   const withId  = cards.filter(c => c.tcgplayer_id)
   const missing = cards.filter(c => !c.tcgplayer_id)
 
@@ -81,7 +80,7 @@ function exportTCGPlayerCSV(cards) {
     const price = c.tcgplayer_market ? Number(c.tcgplayer_market).toFixed(2) : '0.01'
     return [
       c.tcgplayer_id,
-      'Sorcery',
+      productLine,
       c.set_name ?? '',
       c.name ?? '',
       '',
@@ -122,6 +121,8 @@ function exportTCGPlayerCSV(cards) {
 
 export default function Inventory() {
   const navigate = useNavigate()
+  const { activeGame } = useGame()
+  const config = gameConfig(activeGame.slug)
   const [cards, setCards]           = useState([])
   const [loading, setLoading]       = useState(true)
   const [search, setSearch]         = useState('')
@@ -152,7 +153,7 @@ export default function Inventory() {
     // Fetch all cards in batches to bypass the 1000-row default limit
     let allCards = [], batchPage = 0
     while (true) {
-      const { data } = await supabase.from('v_inventory_dashboard').select('*').order('name')
+      const { data } = await supabase.from('v_inventory_dashboard').select('*').eq('game_id', activeGame.id).order('name')
         .range(batchPage * 1000, (batchPage + 1) * 1000 - 1)
       allCards = [...allCards, ...(data ?? [])]
       if (!data || data.length < 1000) break
@@ -178,10 +179,10 @@ export default function Inventory() {
     setLoading(false)
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [activeGame.id])
 
   async function fetchBoxes() {
-    const { data } = await supabase.from('boxes').select('id, name, purchase_price, pack_count').order('name')
+    const { data } = await supabase.from('boxes').select('id, name, purchase_price, pack_count').eq('game_id', activeGame.id).order('name')
     setBoxes(data ?? [])
   }
 
@@ -213,7 +214,7 @@ export default function Inventory() {
 
   const SORT_ACCESSORS = {
     name:            c => c.name?.toLowerCase() ?? '',
-    rarity:          c => RARITIES.indexOf(c.rarity),
+    rarity:          c => config.rarities.indexOf(c.rarity),
     condition:       c => CONDITIONS.indexOf(c.condition),
     quantity_owned:  c => c.quantity_owned ?? 0,
     cost_basis:      c => c.cost_basis ?? -Infinity,
@@ -250,7 +251,7 @@ export default function Inventory() {
   const paginated  = sorted.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE)
 
   function openAdd() {
-    setForm(BLANK)
+    setForm({ ...BLANK, set_name: config.defaultSet, rarity: config.defaultRarity })
     setSelBoxId('')
     setSelPackId('')
     setNewPackNumber(1)
@@ -293,7 +294,7 @@ export default function Inventory() {
 
     let error
     if (modal === 'add') {
-      const res = await supabase.from('cards').insert(payload).select('id').single()
+      const res = await supabase.from('cards').insert({ ...payload, game_id: activeGame.id }).select('id').single()
       error = res.error
       if (!error && res.data?.id) {
         let packId = selPackId
@@ -414,7 +415,7 @@ export default function Inventory() {
           </button>
           <button
             className="btn btn-ghost"
-            onClick={() => setExportResult(exportTCGPlayerCSV(cardsToExport))}
+            onClick={() => setExportResult(exportTCGPlayerCSV(cardsToExport, config.displayName))}
             disabled={loading || filtered.length === 0}
           >
             ↓ TCGPlayer{selectedIds.size > 0 ? ` (${selectedIds.size})` : ''}
@@ -434,7 +435,7 @@ export default function Inventory() {
         />
         <select className="form-select" style={{ maxWidth: 150 }} value={rarityFilter} onChange={e => setRarityFilter(e.target.value)}>
           <option value="all">All Rarities</option>
-          {RARITIES.map(r => <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>)}
+          {config.rarities.map(r => <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>)}
         </select>
         <select className="form-select" style={{ maxWidth: 160 }} value={setFilter} onChange={e => setSetFilter(e.target.value)}>
           <option value="all">All Sets</option>
@@ -622,7 +623,7 @@ export default function Inventory() {
                 <div className="form-group">
                   <label className="form-label">Set</label>
                   <select className="form-select" value={form.set_name} onChange={f('set_name')}>
-                    {SETS.map(s => <option key={s}>{s}</option>)}
+                    {config.sets.map(s => <option key={s}>{s}</option>)}
                   </select>
                 </div>
                 <div className="form-group">
@@ -634,7 +635,7 @@ export default function Inventory() {
                 <div className="form-group">
                   <label className="form-label">Rarity</label>
                   <select className="form-select" value={form.rarity} onChange={f('rarity')}>
-                    {RARITIES.map(r => <option key={r}>{r}</option>)}
+                    {config.rarities.map(r => <option key={r}>{r}</option>)}
                   </select>
                 </div>
                 <div className="form-group">
@@ -689,7 +690,7 @@ export default function Inventory() {
                   <label className="form-label">Card type <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(optional)</span></label>
                   <select className="form-select" value={form.card_type} onChange={f('card_type')}>
                     <option value="">— unspecified —</option>
-                    {CARD_TYPES.map(t => <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>)}
+                    {config.cardTypes.map(t => <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>)}
                   </select>
                 </div>
               </div>

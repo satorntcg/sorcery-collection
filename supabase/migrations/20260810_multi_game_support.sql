@@ -1,18 +1,125 @@
--- View definitions for sorcery-tcg-app
--- NOTE: public pages (/, /cards, /cards/:id) use the anon key and need SELECT policies
--- on the `cards` and `price_snapshots` tables (or on this view via a SECURITY DEFINER function).
--- Quick fix — run once in the SQL editor if not already present:
---   ALTER TABLE public.cards ENABLE ROW LEVEL SECURITY;
---   CREATE POLICY "public read" ON public.cards FOR SELECT USING (true);
---   ALTER TABLE public.price_snapshots ENABLE ROW LEVEL SECURITY;
---   CREATE POLICY "public read" ON public.price_snapshots FOR SELECT USING (true);
--- Run each CREATE OR REPLACE VIEW in the Supabase SQL editor to update.
+-- Multi-game support: a `games` table + `game_id` on the two root entities
+-- (`cards`, `boxes`). Everything else (price_snapshots, ebay_listings,
+-- tcgplayer_listings, packs, pack_cards, youtube_openings, ...) is scoped
+-- transitively through card_id/box_id, so it needs no game_id column of its
+-- own — only the views that surface card/box fields need game_id added to
+-- their SELECT list so the frontend can filter by it.
 --
--- 2026-08-10: added `game_id` (from cards/boxes) to every view below that
--- surfaces card/box fields, as part of multi-game support (see
--- supabase/migrations/20260810_multi_game_support.sql). v_global_pnl /
--- v_tcgplayer_pnl / v_combined_pnl are intentionally NOT scoped by game —
--- they stay whole-business totals.
+-- `cards.rarity` moves from the Sorcery-only `card_rarity` enum to `text`,
+-- since rarity vocabulary is completely different per game (confirmed via
+-- Riftbound: common/uncommon/rare/epic/overnumbered vs. Sorcery's
+-- ordinary/exceptional/elite/unique). `cards.card_type` was already `text`.
+-- `condition` stays the shared `card_condition` enum — grading terminology
+-- is a universal TCG standard, not game-specific.
+
+-- ── games table ────────────────────────────────────────────────────────
+
+CREATE TABLE public.games (
+    id uuid DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+    name text NOT NULL,
+    slug text NOT NULL UNIQUE,
+    is_active boolean DEFAULT true NOT NULL,
+    sort_order integer DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+ALTER TABLE public.games OWNER TO postgres;
+
+COMMENT ON TABLE public.games IS 'Games tracked by the app (Sorcery, Riftbound, ...). Root FK target for cards.game_id / boxes.game_id.';
+
+CREATE TRIGGER trg_games_updated_at BEFORE UPDATE ON public.games FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+ALTER TABLE public.games ENABLE ROW LEVEL SECURITY;
+CREATE POLICY auth_only ON public.games USING ((auth.role() = 'authenticated'::text));
+
+GRANT ALL ON TABLE public.games TO anon;
+GRANT ALL ON TABLE public.games TO authenticated;
+GRANT ALL ON TABLE public.games TO service_role;
+
+INSERT INTO public.games (name, slug, sort_order) VALUES
+    ('Sorcery TCG', 'sorcery', 1),
+    ('Riftbound', 'riftbound', 2);
+
+-- ── game_id on cards / boxes ──────────────────────────────────────────
+
+ALTER TABLE public.cards ADD COLUMN game_id uuid REFERENCES public.games(id);
+UPDATE public.cards SET game_id = (SELECT id FROM public.games WHERE slug = 'sorcery') WHERE game_id IS NULL;
+ALTER TABLE public.cards ALTER COLUMN game_id SET NOT NULL;
+CREATE INDEX cards_game_id_idx ON public.cards USING btree (game_id);
+
+ALTER TABLE public.boxes ADD COLUMN game_id uuid REFERENCES public.games(id);
+UPDATE public.boxes SET game_id = (SELECT id FROM public.games WHERE slug = 'sorcery') WHERE game_id IS NULL;
+ALTER TABLE public.boxes ALTER COLUMN game_id SET NOT NULL;
+CREATE INDEX boxes_game_id_idx ON public.boxes USING btree (game_id);
+
+-- ── cards.rarity: enum → text ─────────────────────────────────────────
+-- Postgres refuses to ALTER COLUMN TYPE while any view depends on that
+-- column (checked against views as they currently exist, not what the rest
+-- of this script recreates them as) — so every view touching cards.rarity
+-- must be dropped first. CASCADE + IF EXISTS makes the order harmless: it's
+-- safe to list a view that's already gone via an earlier CASCADE.
+
+DROP VIEW IF EXISTS public.v_active_alerts CASCADE;
+DROP VIEW IF EXISTS public.v_box_pnl CASCADE;
+DROP VIEW IF EXISTS public.v_ebay_active CASCADE;
+DROP VIEW IF EXISTS public.v_ebay_sold CASCADE;
+DROP VIEW IF EXISTS public.v_tcgplayer_active CASCADE;
+DROP VIEW IF EXISTS public.v_tcgplayer_sold CASCADE;
+DROP VIEW IF EXISTS public.v_inventory_dashboard CASCADE;
+DROP VIEW IF EXISTS public.v_latest_prices CASCADE;
+DROP VIEW IF EXISTS public.v_listing_price_alerts CASCADE;
+DROP VIEW IF EXISTS public.v_pack_pnl CASCADE;
+DROP VIEW IF EXISTS public.v_price_gainers_losers CASCADE;
+DROP VIEW IF EXISTS public.v_price_highs CASCADE;
+DROP VIEW IF EXISTS public.v_price_history CASCADE;
+DROP VIEW IF EXISTS public.v_stale_listings CASCADE;
+DROP VIEW IF EXISTS public.v_unrealized_gain_alerts CASCADE;
+DROP VIEW IF EXISTS public.v_youtube_opening_summary CASCADE;
+
+ALTER TABLE public.cards ALTER COLUMN rarity TYPE text USING rarity::text;
+DROP TYPE public.card_rarity;
+
+-- ── Views: recreate with game_id added so the frontend can filter by
+-- active game ───────────────────────────────────────────────────────────
+-- (Re-running the exact CREATE OR REPLACE VIEW bodies from supabase/views.sql
+-- with `c.game_id` / `b.game_id` added to the SELECT list, and to GROUP BY
+-- where the view aggregates. v_global_pnl / v_tcgplayer_pnl / v_combined_pnl
+-- are intentionally left untouched — they stay all-games-combined, and
+-- weren't dropped above since they don't reference cards.rarity.)
+--
+-- v_latest_prices goes first — several other views below (v_box_pnl,
+-- v_ebay_active, v_tcgplayer_active, v_inventory_dashboard,
+-- v_listing_price_alerts, v_pack_pnl, v_stale_listings,
+-- v_unrealized_gain_alerts, v_youtube_opening_summary) JOIN against it, and
+-- it was just dropped above, so it must exist again before they're recreated.
+
+CREATE OR REPLACE VIEW public.v_latest_prices AS
+ SELECT DISTINCT ON (c.id) c.id AS card_id,
+    c.name,
+    c.set_name,
+    c.rarity,
+    c.foil,
+    c.game_id,
+    c.tcgplayer_id,
+    ps.tcgplayer_market,
+    ps.tcgplayer_low,
+    ps.ebay_sold_avg,
+    ps.ebay_sold_low,
+    ps.ebay_sold_high,
+    ps.ebay_sold_count,
+    ps.checked_at,
+        CASE
+            WHEN ((b.purchase_price IS NOT NULL) AND (b.pack_count > 0)) THEN round(((b.purchase_price / (b.pack_count)::numeric) / 15.0), 4)
+            ELSE NULL::numeric
+        END AS cost_basis,
+    ps.tcgplayer_market AS tcg_market_price
+   FROM ((((cards c
+     LEFT JOIN pack_cards pc ON ((pc.card_id = c.id)))
+     LEFT JOIN packs pk ON ((pk.id = pc.pack_id)))
+     LEFT JOIN boxes b ON ((b.id = pk.box_id)))
+     LEFT JOIN price_snapshots ps ON ((ps.card_id = c.id)))
+  ORDER BY c.id, ps.checked_at DESC;
 
 CREATE OR REPLACE VIEW public.v_active_alerts AS
  SELECT pa.id,
@@ -135,19 +242,6 @@ CREATE OR REPLACE VIEW public.v_ebay_sold AS
   GROUP BY el.id, el.title, el.listed_price, el.shipping_cost, el.sold_price, el.sold_shipping, el.sold_ebay_fee, el.cost_basis, el.net_profit, el.sold_at, el.listed_at, el.condition, el.notes, el.ebay_url, el.card_id, c.name, c.set_name, c.rarity, c.foil, c.game_id
   ORDER BY el.sold_at DESC;
 
-CREATE OR REPLACE VIEW public.v_global_pnl AS
- SELECT COALESCE(sum(sold_price) FILTER (WHERE (status = 'sold'::text)), (0)::numeric) AS total_revenue,
-    COALESCE(sum(sold_ebay_fee) FILTER (WHERE (status = 'sold'::text)), (0)::numeric) AS total_ebay_fees,
-    COALESCE(sum(sold_shipping) FILTER (WHERE (status = 'sold'::text)), (0)::numeric) AS total_shipping_paid,
-    COALESCE(sum(cost_basis) FILTER (WHERE (status = 'sold'::text)), (0)::numeric) AS total_cogs,
-    COALESCE(sum(net_profit) FILTER (WHERE (status = 'sold'::text)), (0)::numeric) AS total_net_profit,
-    count(*) FILTER (WHERE (status = 'active'::text)) AS active_listings_count,
-    COALESCE(sum(listed_price) FILTER (WHERE (status = 'active'::text)), (0)::numeric) AS active_listings_gmv,
-    COALESCE(sum(net_listed) FILTER (WHERE (status = 'active'::text)), (0)::numeric) AS active_listings_net_if_sold,
-    count(*) FILTER (WHERE (status = 'sold'::text)) AS total_sold,
-    count(*) AS total_listings
-   FROM ebay_listings;
-
 CREATE OR REPLACE VIEW public.v_tcgplayer_active AS
  SELECT tl.id,
     tl.title,
@@ -220,39 +314,6 @@ CREATE OR REPLACE VIEW public.v_tcgplayer_sold AS
   GROUP BY tl.id, tl.title, tl.listed_price, tl.shipping_cost, tl.quantity, tl.sold_price, tl.sold_shipping, tl.sold_fee, tl.cost_basis, tl.net_profit, tl.sold_at, tl.listed_at, tl.condition, tl.notes, tl.tcgplayer_url, tl.card_id, c.name, c.set_name, c.rarity, c.foil, c.game_id
   ORDER BY tl.sold_at DESC;
 
-CREATE OR REPLACE VIEW public.v_tcgplayer_pnl AS
- SELECT COALESCE(sum(sold_price) FILTER (WHERE (status = 'sold'::text)), (0)::numeric) AS total_revenue,
-    COALESCE(sum(sold_fee) FILTER (WHERE (status = 'sold'::text)), (0)::numeric) AS total_tcg_fees,
-    COALESCE(sum(sold_shipping) FILTER (WHERE (status = 'sold'::text)), (0)::numeric) AS total_shipping_paid,
-    COALESCE(sum(cost_basis) FILTER (WHERE (status = 'sold'::text)), (0)::numeric) AS total_cogs,
-    COALESCE(sum(net_profit) FILTER (WHERE (status = 'sold'::text)), (0)::numeric) AS total_net_profit,
-    count(*) FILTER (WHERE (status = 'active'::text)) AS active_listings_count,
-    COALESCE(sum(listed_price) FILTER (WHERE (status = 'active'::text)), (0)::numeric) AS active_listings_gmv,
-    COALESCE(sum(net_listed) FILTER (WHERE (status = 'active'::text)), (0)::numeric) AS active_listings_net_if_sold,
-    count(*) FILTER (WHERE (status = 'sold'::text)) AS total_sold,
-    count(*) AS total_listings
-   FROM tcgplayer_listings;
-
--- Combines eBay + TCGPlayer P&L so "business profit" (revenue − fees − box costs) can be
--- computed once against combined COGS, instead of once per channel against the full box
--- spend (which double-counted cards sold through the other channel as still-unsold stock).
--- NOT scoped by game_id — stays a whole-business total across every game tracked.
-CREATE OR REPLACE VIEW public.v_combined_pnl AS
- SELECT
-    (eb.total_revenue + tc.total_revenue) AS total_revenue,
-    eb.total_ebay_fees,
-    tc.total_tcg_fees,
-    (eb.total_ebay_fees + tc.total_tcg_fees) AS total_fees,
-    (eb.total_shipping_paid + tc.total_shipping_paid) AS total_shipping_paid,
-    (eb.total_cogs + tc.total_cogs) AS total_cogs,
-    (eb.total_net_profit + tc.total_net_profit) AS total_net_profit,
-    (eb.active_listings_count + tc.active_listings_count) AS active_listings_count,
-    (eb.active_listings_gmv + tc.active_listings_gmv) AS active_listings_gmv,
-    (eb.active_listings_net_if_sold + tc.active_listings_net_if_sold) AS active_listings_net_if_sold,
-    (eb.total_sold + tc.total_sold) AS total_sold,
-    (eb.total_listings + tc.total_listings) AS total_listings
-   FROM v_global_pnl eb, v_tcgplayer_pnl tc;
-
 CREATE OR REPLACE VIEW public.v_inventory_dashboard AS
  SELECT DISTINCT ON (c.id) c.id,
     c.name,
@@ -299,35 +360,6 @@ CREATE OR REPLACE VIEW public.v_inventory_dashboard AS
           GROUP BY ebay_listings.card_id) el ON ((el.card_id = c.id)))
   ORDER BY c.id, c.name;
 
-CREATE OR REPLACE VIEW public.v_latest_prices AS
- SELECT DISTINCT ON (c.id) c.id AS card_id,
-    c.name,
-    c.set_name,
-    c.rarity,
-    c.foil,
-    c.game_id,
-    c.tcgplayer_id,
-    ps.tcgplayer_market,
-    ps.tcgplayer_low,
-    ps.ebay_sold_avg,
-    ps.ebay_sold_low,
-    ps.ebay_sold_high,
-    ps.ebay_sold_count,
-    ps.checked_at,
-        CASE
-            WHEN ((b.purchase_price IS NOT NULL) AND (b.pack_count > 0)) THEN round(((b.purchase_price / (b.pack_count)::numeric) / 15.0), 4)
-            ELSE NULL::numeric
-        END AS cost_basis,
-    ps.tcgplayer_market AS tcg_market_price
-   FROM ((((cards c
-     LEFT JOIN pack_cards pc ON ((pc.card_id = c.id)))
-     LEFT JOIN packs pk ON ((pk.id = pc.pack_id)))
-     LEFT JOIN boxes b ON ((b.id = pk.box_id)))
-     LEFT JOIN price_snapshots ps ON ((ps.card_id = c.id)))
-  ORDER BY c.id, ps.checked_at DESC;
-
--- Gap is calculated on (listed_price - shipping_cost) vs tcgplayer_market so that
--- the $5 shipping charge is not counted against the card price comparison.
 CREATE OR REPLACE VIEW public.v_listing_price_alerts AS
  WITH listing_prices AS (
          SELECT el_1.id AS listing_id,
@@ -579,3 +611,26 @@ CREATE OR REPLACE VIEW public.v_youtube_opening_summary AS
      LEFT JOIN v_latest_prices lp ON ((lp.card_id = pc.card_id)))
   GROUP BY yo.id, yo.title, yo.youtube_url, yo.filmed_at, yo.notes, b.id, b.name, b.set_name, b.pack_count, b.pack_msrp, b.purchase_price, b.game_id
   ORDER BY yo.filmed_at DESC;
+
+-- ── Re-grant on every dropped-and-recreated view ───────────────────────
+-- DROP VIEW ... CREATE VIEW makes a new object — any explicit grants the
+-- old view had (like the ones the 20260706 migration gave v_tcgplayer_active
+-- /v_tcgplayer_sold) do NOT carry over. Re-granting unconditionally here is
+-- cheap insurance against silently losing anon/authenticated read access.
+
+GRANT ALL ON TABLE public.v_active_alerts            TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.v_box_pnl                   TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.v_ebay_active               TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.v_ebay_sold                 TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.v_tcgplayer_active          TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.v_tcgplayer_sold            TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.v_inventory_dashboard       TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.v_latest_prices             TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.v_listing_price_alerts      TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.v_pack_pnl                  TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.v_price_gainers_losers      TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.v_price_highs               TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.v_price_history             TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.v_stale_listings            TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.v_unrealized_gain_alerts    TO anon, authenticated, service_role;
+GRANT ALL ON TABLE public.v_youtube_opening_summary   TO anon, authenticated, service_role;

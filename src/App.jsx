@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate, Outlet } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { supabase } from './lib/supabase'
+import { GameProvider } from './context/GameContext'
 import Sidebar from './components/Sidebar'
 import PublicNav from './components/PublicNav'
 import Dashboard from './pages/Dashboard'
@@ -40,12 +41,14 @@ function PrivateGuard({ session }) {
 
 function PrivateLayout({ alertCount }) {
   return (
-    <div className="app-shell">
-      <Sidebar alertCount={alertCount} onSignOut={() => supabase.auth.signOut()} />
-      <main className="main-content">
-        <Outlet />
-      </main>
-    </div>
+    <GameProvider>
+      <div className="app-shell">
+        <Sidebar alertCount={alertCount} onSignOut={() => supabase.auth.signOut()} />
+        <main className="main-content">
+          <Outlet />
+        </main>
+      </div>
+    </GameProvider>
   )
 }
 

@@ -1,32 +1,34 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
+import { useGame } from '../context/GameContext'
+import { gameConfig } from '../lib/games'
 
 const usd    = (n) => n != null ? `$${Number(n).toFixed(2)}` : '—'
 const fmtPnl = (n) => { if (n == null) return '—'; const v = Number(n); return `${v >= 0 ? '+$' : '-$'}${Math.abs(v).toFixed(2)}` }
 const date   = (d) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'
 
 const BOX_TYPES  = ['booster_box', 'prerelease_kit', 'single_booster', 'bundle', 'other']
-const SETS       = ['Alpha', 'Beta', 'Arthurian Legends', 'Gothic', 'Other']
-const RARITIES   = ['ordinary', 'exceptional', 'elite', 'unique']
 const CONDITIONS = ['near_mint', 'lightly_played', 'moderately_played', 'heavily_played', 'damaged']
 
-const BLANK = { name: '', set_name: 'Gothic', box_type: 'booster_box', purchase_price: '', pack_count: '36', pack_msrp: '5', purchased_at: '', seller: '', notes: '' }
+const BLANK = { name: '', set_name: '', box_type: 'booster_box', purchase_price: '', pack_count: '36', pack_msrp: '5', purchased_at: '', seller: '', notes: '' }
 
 const PULL_BLANK = {
   mode:             'search',   // 'search' | 'new'
   cardId:           null,
   cardName:         '',
   tcgplayer_market: null,
-  rarity:           'ordinary',
+  rarity:           '',
   condition:        'near_mint',
   foil:             false,
-  setName:          'Gothic',
+  setName:          '',
   packId:           '',
   newPackNumber:    '',
   quantity:         1,
 }
 
 export default function Boxes() {
+  const { activeGame } = useGame()
+  const config = gameConfig(activeGame.slug)
   const [boxes,        setBoxes]        = useState([])
   const [loading,      setLoading]      = useState(true)
   const [modal,        setModal]        = useState(false)
@@ -57,6 +59,7 @@ export default function Boxes() {
     const { data } = await supabase
       .from('v_box_pnl')
       .select('*')
+      .eq('game_id', activeGame.id)
       .order('purchased_at', { ascending: false })
     setBoxes(data ?? [])
     setLoading(false)
@@ -109,7 +112,7 @@ export default function Boxes() {
     setExistingPackCards((data ?? []).sort((a, b) => (a.cards?.name ?? '').localeCompare(b.cards?.name ?? '')))
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [activeGame.id])
   useEffect(() => {
     if (selected) { loadBoxCards(selected); loadBoxPacks(selected) }
     else { setBoxCards([]); setBoxPacks([]) }
@@ -124,6 +127,7 @@ export default function Boxes() {
       const { data: cardData } = await supabase
         .from('cards')
         .select('id, name, rarity, set_name, foil')
+        .eq('game_id', activeGame.id)
         .ilike('name', `%${cardSearch.trim()}%`)
         .order('name')
         .limit(8)
@@ -176,6 +180,7 @@ export default function Boxes() {
       purchased_at:   form.purchased_at ? new Date(form.purchased_at).toISOString() : new Date().toISOString(),
       seller:         form.seller || null,
       notes:          form.notes || null,
+      game_id:        activeGame.id,
     })
     setSaving(false)
     if (error) { alert(`Save failed: ${error.message}`); return }
@@ -205,7 +210,7 @@ export default function Boxes() {
     }])
     setCardSearch('')
     setCardResults([])
-    setPullForm(prev => ({ ...PULL_BLANK, packId: prev.packId, newPackNumber: prev.newPackNumber }))
+    setPullForm(prev => ({ ...PULL_BLANK, rarity: config.defaultRarity, setName: config.defaultSet, packId: prev.packId, newPackNumber: prev.newPackNumber }))
   }
 
   function removeFromPull(index) {
@@ -241,7 +246,7 @@ export default function Boxes() {
         if (item.mode === 'new') {
           const { data: newCard, error: cardErr } = await supabase
             .from('cards')
-            .insert({ name: item.cardName.trim(), set_name: item.setName, rarity: item.rarity, condition: item.condition, foil: item.foil, quantity_owned: qty })
+            .insert({ name: item.cardName.trim(), set_name: item.setName, rarity: item.rarity, condition: item.condition, foil: item.foil, quantity_owned: qty, game_id: activeGame.id })
             .select('id').single()
           if (cardErr) { alert(`Card creation failed: ${cardErr.message}`); setPullSaving(false); return }
           cardId = newCard.id
@@ -272,7 +277,7 @@ export default function Boxes() {
   }
 
   function openPullModal() {
-    setPullForm({ ...PULL_BLANK, packId: boxPacks.length === 1 ? boxPacks[0].id : '' })
+    setPullForm({ ...PULL_BLANK, rarity: config.defaultRarity, setName: config.defaultSet, packId: boxPacks.length === 1 ? boxPacks[0].id : '' })
     setPullItems([])
     setExistingPackCards([])
     setCardSearch('')
@@ -341,7 +346,7 @@ export default function Boxes() {
           <h1 className="page-title">Boxes & P&L</h1>
           <p className="page-subtitle">{boxes.length} boxes tracked</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setModal(true)}>+ Add box</button>
+        <button className="btn btn-primary" onClick={() => { setForm({ ...BLANK, set_name: config.defaultSet }); setModal(true) }}>+ Add box</button>
       </div>
 
       {/* Summary metrics */}
@@ -617,7 +622,7 @@ export default function Boxes() {
                 <div className="form-group">
                   <label className="form-label">Set</label>
                   <select className="form-select" value={form.set_name} onChange={f('set_name')}>
-                    {SETS.map(s => <option key={s}>{s}</option>)}
+                    {config.sets.map(s => <option key={s}>{s}</option>)}
                   </select>
                 </div>
               </div>
@@ -789,13 +794,13 @@ export default function Boxes() {
                       <div className="form-group">
                         <label className="form-label">Rarity *</label>
                         <select className="form-select" value={pullForm.rarity} onChange={e => pf('rarity', e.target.value)}>
-                          {RARITIES.map(r => <option key={r} value={r}>{r}</option>)}
+                          {config.rarities.map(r => <option key={r} value={r}>{r}</option>)}
                         </select>
                       </div>
                       <div className="form-group">
                         <label className="form-label">Set</label>
                         <select className="form-select" value={pullForm.setName} onChange={e => pf('setName', e.target.value)}>
-                          {SETS.map(s => <option key={s}>{s}</option>)}
+                          {config.sets.map(s => <option key={s}>{s}</option>)}
                         </select>
                       </div>
                     </div>

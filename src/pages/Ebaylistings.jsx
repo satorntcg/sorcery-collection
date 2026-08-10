@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useSearchParams, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { useGame } from '../context/GameContext'
+import { gameConfig } from '../lib/games'
 
 const ebayItemNum = url => url?.match(/\/itm\/(\d+)/)?.[1] ?? null
 
@@ -13,7 +15,7 @@ const fmtPnl = (n) => { if (n == null) return '—'; const v = Number(n); return
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'
 
 // ── Create modal (2-step: pick cards → set prices) ───────────
-function CreateModal({ cards, onClose, onSaved }) {
+function CreateModal({ cards, config, onClose, onSaved }) {
   const [step, setStep]               = useState(1)
   const [search, setSearch]           = useState('')
   const [selectedIds, setSelectedIds] = useState([])
@@ -64,8 +66,8 @@ function CreateModal({ cards, onClose, onSaved }) {
     const totalQtyInLot = selectedIds.reduce((s, id) => s + (cardQtys[id] ?? 1), 0)
     const isSingle = selectedIds.length === 1 && (cardQtys[selectedIds[0]] ?? 1) === 1
     setTitle(isSingle
-      ? `${selectedCards[0].name}${selectedCards[0].foil ? ' (Foil)' : ''} — Sorcery TCG${selectedCards[0].set_name ? ` ${selectedCards[0].set_name}` : ''} — ${condition}`
-      : `Sorcery TCG Lot — ${totalQtyInLot} Cards`)
+      ? `${selectedCards[0].name}${selectedCards[0].foil ? ' (Foil)' : ''} — ${config.displayName}${selectedCards[0].set_name ? ` ${selectedCards[0].set_name}` : ''} — ${condition}`
+      : `${config.displayName} Lot — ${totalQtyInLot} Cards`)
     setStep(2)
   }
 
@@ -876,6 +878,8 @@ function DeleteSoldModal({ listing, onClose, onSaved }) {
 }
 
 export default function EbayListings() {
+  const { activeGame } = useGame()
+  const config = gameConfig(activeGame.slug)
   const [tab, setTab]           = useState('active')
   const [search, setSearch]         = useState('')
   const [unlinkedOnly, setUnlinkedOnly]   = useState(false)
@@ -912,6 +916,8 @@ export default function EbayListings() {
     return () => clearTimeout(timer)
   }, [highlightId, loading])
 
+  useEffect(() => { setCards([]) }, [activeGame.id])
+
   const fetchCards = useCallback(async () => {
     if (cards.length > 0) return  // already loaded
     let allCards = [], cardPage = 0
@@ -919,6 +925,7 @@ export default function EbayListings() {
       const { data } = await supabase
         .from('v_latest_prices')
         .select('card_id, name, set_name, rarity, foil, tcg_market_price, cost_basis')
+        .eq('game_id', activeGame.id)
         .order('name')
         .range(cardPage * 1000, (cardPage + 1) * 1000 - 1)
       allCards = [...allCards, ...(data ?? [])]
@@ -926,13 +933,13 @@ export default function EbayListings() {
       cardPage++
     }
     setCards(allCards)
-  }, [cards.length])
+  }, [cards.length, activeGame.id])
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
     const [activeRes, soldRes, pnlRes, tcgRes] = await Promise.all([
-      supabase.from('v_ebay_active').select('*'),
-      supabase.from('v_ebay_sold').select('*'),
+      supabase.from('v_ebay_active').select('*').eq('game_id', activeGame.id),
+      supabase.from('v_ebay_sold').select('*').eq('game_id', activeGame.id),
       supabase.from('v_global_pnl').select('*').single(),
       supabase.from('ebay_listings').select('id, tcgplayer_listed'),
     ])
@@ -944,7 +951,7 @@ export default function EbayListings() {
     ])
     setPnl(pnlRes.data)
     setLoading(false)
-  }, [])
+  }, [activeGame.id])
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
@@ -1245,7 +1252,7 @@ export default function EbayListings() {
       )}
 
       {/* Modals */}
-      {showCreate && <CreateModal cards={cards} onClose={() => setShowCreate(false)} onSaved={onSaved} />}
+      {showCreate && <CreateModal cards={cards} config={config} onClose={() => setShowCreate(false)} onSaved={onSaved} />}
       {editTarget  && <EditModal  listing={editTarget} cards={cards} onClose={() => setEditTarget(null)} onSaved={onSaved} />}
       {soldTarget  && <SoldModal  listing={soldTarget} onClose={() => setSoldTarget(null)} onSaved={onSaved} />}
       {endTarget   && <EndModal   listing={endTarget}  onClose={() => setEndTarget(null)}  onSaved={onSaved} />}

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { useGame } from '../context/GameContext'
 
 const usd    = (n) => n == null ? '—' : `$${Number(n).toFixed(2)}`
 const fmtChg = (n) => { if (n == null) return '—'; const v = Number(n); return `${v >= 0 ? '+$' : '-$'}${Math.abs(v).toFixed(2)}` }
@@ -15,6 +16,7 @@ const TABS = [
 
 export default function Alerts({ onDismiss }) {
   const navigate = useNavigate()
+  const { activeGame } = useGame()
   const [tab, setTab]                   = useState('listings')
   const [alerts, setAlerts]             = useState([])
   const [listingAlerts, setListingAlerts] = useState([])
@@ -25,9 +27,9 @@ export default function Alerts({ onDismiss }) {
   async function loadAll() {
     setLoading(true)
     const [alertRes, listingRes, staleRes, ebayRes] = await Promise.all([
-      supabase.from('v_active_alerts').select('*'),
-      supabase.from('v_listing_price_alerts').select('*'),
-      supabase.from('v_stale_listings').select('*'),
+      supabase.from('v_active_alerts').select('*').eq('game_id', activeGame.id),
+      supabase.from('v_listing_price_alerts').select('*').eq('game_id', activeGame.id),
+      supabase.from('v_stale_listings').select('*').eq('game_id', activeGame.id),
       supabase.from('ebay_listings').select('id, card_id, ebay_url').eq('status', 'active').not('card_id', 'is', null),
     ])
 
@@ -52,7 +54,7 @@ export default function Alerts({ onDismiss }) {
     setLoading(false)
   }
 
-  useEffect(() => { loadAll() }, [])
+  useEffect(() => { loadAll() }, [activeGame.id])
 
   async function dismiss(id) {
     await supabase.from('price_alerts').update({ dismissed: true }).eq('id', id)

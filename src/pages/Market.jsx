@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { useSearchParams, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts'
+import { useGame } from '../context/GameContext'
+import { gameConfig } from '../lib/games'
 
 const usd       = (n) => n != null ? `$${Number(n).toFixed(2)}` : '—'
 const dateShort = (d) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''
@@ -20,6 +22,8 @@ function timeAgo(d) {
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 
 export default function Market() {
+  const { activeGame } = useGame()
+  const config = gameConfig(activeGame.slug)
   const [searchParams] = useSearchParams()
   const [cards, setCards]             = useState([])
   const [selected, setSelected]       = useState(null)
@@ -38,6 +42,7 @@ export default function Market() {
         const { data } = await supabase
           .from('cards')
           .select('id, name, set_name, rarity, foil, tcgplayer_id')
+          .eq('game_id', activeGame.id)
           .order('name', { ascending: true })
           .range(cardPage * 1000, (cardPage + 1) * 1000 - 1)
         allCards = [...allCards, ...(data ?? [])]
@@ -75,7 +80,7 @@ export default function Market() {
       setLoading(false)
     }
     load()
-  }, [runResult])
+  }, [runResult, activeGame.id])
 
   useEffect(() => {
     if (!selected) { setMyListings([]); return }
@@ -335,7 +340,7 @@ export default function Market() {
                           <a href={`https://www.tcgplayer.com/product/${displayCard.tcgplayer_id}`} target="_blank" rel="noreferrer" style={{ fontSize: 10, color: 'var(--gold)', textDecoration: 'none', borderBottom: '1px dashed var(--gold)' }}>
                             Listings ↗
                           </a>
-                          <a href={`https://www.tcgplayer.com/search/sorcery-contested-realm/product?productLineName=sorcery-contested-realm&q=${encodeURIComponent(displayCard?.name)}&view=grid`} target="_blank" rel="noreferrer" style={{ fontSize: 10, color: 'var(--gold)', textDecoration: 'none', borderBottom: '1px dashed var(--gold)' }}>
+                          <a href={`https://www.tcgplayer.com/search/${config.tcgplayerSlug}/product?productLineName=${config.tcgplayerSlug}&q=${encodeURIComponent(displayCard?.name)}&view=grid`} target="_blank" rel="noreferrer" style={{ fontSize: 10, color: 'var(--gold)', textDecoration: 'none', borderBottom: '1px dashed var(--gold)' }}>
                             Price history ↗
                           </a>
                         </div>
@@ -351,7 +356,7 @@ export default function Market() {
                     <div style={{ fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span>eBay sold avg</span>
                       <a
-                        href={`https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(`${displayCard?.name}${displayCard?.foil ? ' foil' : ' non-foil'} Sorcery TCG`)}&_sop=13&LH_Sold=1&LH_Complete=1`}
+                        href={`https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(`${displayCard?.name}${displayCard?.foil ? ' foil' : ' non-foil'} ${config.displayName}`)}&_sop=13&LH_Sold=1&LH_Complete=1`}
                         target="_blank" rel="noreferrer"
                         style={{ fontSize: 10, color: 'var(--text-secondary)', textDecoration: 'none', borderBottom: '1px dashed var(--border-mid)' }}
                       >
@@ -364,7 +369,7 @@ export default function Market() {
                     <div style={{ fontSize: 10, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--text-muted)', marginBottom: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span>eBay sold range</span>
                       <a
-                        href={`https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(`${displayCard?.name}${displayCard?.foil ? ' foil' : ' non-foil'} Sorcery TCG`)}&_sop=15&LH_Sold=1&LH_Complete=1`}
+                        href={`https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(`${displayCard?.name}${displayCard?.foil ? ' foil' : ' non-foil'} ${config.displayName}`)}&_sop=15&LH_Sold=1&LH_Complete=1`}
                         target="_blank" rel="noreferrer"
                         style={{ fontSize: 10, color: 'var(--text-secondary)', textDecoration: 'none', borderBottom: '1px dashed var(--border-mid)' }}
                       >

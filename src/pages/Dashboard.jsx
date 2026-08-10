@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 import { Link, useNavigate } from 'react-router-dom'
 import WeeklyMovers from '../components/Weeklymovers'
+import { useGame } from '../context/GameContext'
+import { gameConfig } from '../lib/games'
 
 const toNumber = (value) => {
   if (value == null || value === '') return null
@@ -41,6 +43,8 @@ function PriceChange({ value }) {
 
 export default function Dashboard() {
   const navigate = useNavigate()
+  const { activeGame } = useGame()
+  const config = gameConfig(activeGame.slug)
   const [inventory, setInventory] = useState([])
   const [alerts, setAlerts]       = useState([])
   const [loading, setLoading]     = useState(true)
@@ -52,13 +56,13 @@ export default function Dashboard() {
       setLoading(true)
       let allCards = [], batchPage = 0
       while (true) {
-        const { data } = await supabase.from('v_inventory_dashboard').select('*').order('name')
+        const { data } = await supabase.from('v_inventory_dashboard').select('*').eq('game_id', activeGame.id).order('name')
           .range(batchPage * 1000, (batchPage + 1) * 1000 - 1)
         allCards = [...allCards, ...(data ?? [])]
         if (!data || data.length < 1000) break
         batchPage++
       }
-      const alertRes = await supabase.from('v_active_alerts').select('*').gte('new_price', 1)
+      const alertRes = await supabase.from('v_active_alerts').select('*').eq('game_id', activeGame.id).gte('new_price', 1)
       setInventory(
         allCards
           .filter(c => (c.quantity_owned ?? 0) > 0)
@@ -68,7 +72,7 @@ export default function Dashboard() {
       setLoading(false)
     }
     load()
-  }, [])
+  }, [activeGame.id])
 
   useEffect(() => {
     supabase.from('v_combined_pnl').select('*').single().then(({ data }) => setPnl(data))
@@ -100,7 +104,7 @@ export default function Dashboard() {
     <div className="page">
       <div className="page-header">
         <h1 className="page-title">Dashboard</h1>
-        <p className="page-subtitle">Your Sorcery TCG collection at a glance</p>
+        <p className="page-subtitle">Your {config.displayName} collection at a glance</p>
       </div>
 
       {/* Metrics */}
@@ -134,7 +138,7 @@ export default function Dashboard() {
       </div>
 
       {/* Weekly movers widget */}
-      <WeeklyMovers />
+      <WeeklyMovers gameId={activeGame.id} defaultSet={config.defaultSet} />
 
       {/* Business P&L — combines eBay + TCGPlayer so box costs aren't double-counted per channel */}
       {pnl && (

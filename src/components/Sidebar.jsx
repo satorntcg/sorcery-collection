@@ -1,4 +1,5 @@
 import { NavLink } from 'react-router-dom'
+import { useGame } from '../context/GameContext'
 
 const NAV = [
   {
@@ -32,13 +33,30 @@ const NAV = [
 ]
 
 export default function Sidebar({ alertCount = 0, onSignOut }) {
+  const { games, activeGame, setActiveGame } = useGame()
+
   return (
     <aside className="sidebar">
       <div className="sidebar-logo">
-        <img src="/favicon.png" alt="Sorcery TCG" className="sidebar-logo-mark" style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover', background: 'transparent' }} />
-        <div className="sidebar-logo-title">Sorcery TCG</div>
+        <img src="/favicon.png" alt="Market Manager" className="sidebar-logo-mark" style={{ width: 40, height: 40, borderRadius: 8, objectFit: 'cover', background: 'transparent' }} />
+        <div className="sidebar-logo-title">{activeGame.name}</div>
         <div className="sidebar-logo-sub">Market Manager</div>
       </div>
+
+      {games.length > 1 && (
+        <div style={{ padding: '0 16px 12px' }}>
+          <select
+            className="form-select"
+            style={{ width: '100%', fontSize: 12 }}
+            value={activeGame.id}
+            onChange={e => setActiveGame(games.find(g => g.id === e.target.value))}
+          >
+            {games.map(g => (
+              <option key={g.id} value={g.id}>{g.name}</option>
+            ))}
+          </select>
+        </div>
+      )}
 
       <nav className="sidebar-nav">
         {NAV.map(({ section, items }) => (

@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
+import { useGame } from '../context/GameContext'
+import { gameConfig } from '../lib/games'
 
 const usd  = (n) => n != null ? `$${Number(n).toFixed(2)}` : '—'
 const date = (d) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'
@@ -7,7 +9,7 @@ const date = (d) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short'
 // ─────────────────────────────────────────
 // Shareable summary card (screenshot target)
 // ─────────────────────────────────────────
-function SummaryCard({ opening, packs }) {
+function SummaryCard({ opening, packs, config }) {
   const cardRef = useRef(null)
 
   const bestPull = packs
@@ -21,7 +23,7 @@ function SummaryCard({ opening, packs }) {
   }))
 
   const trackedValue = packBreakdown.reduce((s, p) => s + p.value, 0)
-  const ordinaryEst  = packs.length * 1.00
+  const ordinaryEst  = packs.length * config.fillerCardValue
   const totalValue   = trackedValue + ordinaryEst
   const totalCost    = packs.length * (opening.pack_msrp ?? 5)
   const pnl          = totalValue - totalCost
@@ -44,7 +46,7 @@ function SummaryCard({ opening, packs }) {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20 }}>
           <div>
             <div style={{ fontFamily: 'var(--font-display)', fontSize: 11, letterSpacing: '0.14em', color: 'var(--gold)', textTransform: 'uppercase', marginBottom: 6 }}>
-              Sorcery TCG · {boxLabel}
+              {config.displayName} · {boxLabel}
             </div>
             <div style={{ fontSize: 18, fontWeight: 500, color: 'var(--text-primary)' }}>{opening.title}</div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
@@ -74,7 +76,7 @@ function SummaryCard({ opening, packs }) {
           ))}
         </div>
         <div style={{ fontSize: 10, color: 'var(--text-muted)', textAlign: 'right', marginBottom: 12 }}>
-          Includes {usd(ordinaryEst)} ordinary card est. ({packs.length} × $1.00)
+          Includes {usd(ordinaryEst)} filler card est. ({packs.length} × {usd(config.fillerCardValue)})
         </div>
 
         {/* Box projection */}
@@ -117,7 +119,7 @@ function SummaryCard({ opening, packs }) {
           <div style={{ fontSize: 10, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 10 }}>Pack breakdown</div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 6 }}>
             {packBreakdown.map(p => {
-              const displayVal = p.value + 1.00
+              const displayVal = p.value + config.fillerCardValue
               const beats      = displayVal >= (opening.pack_msrp ?? 5)
               return (
                 <div key={p.number} style={{
@@ -151,7 +153,7 @@ function SummaryCard({ opening, packs }) {
 // ─────────────────────────────────────────
 // New opening modal
 // ─────────────────────────────────────────
-function NewOpeningModal({ onClose, onCreated }) {
+function NewOpeningModal({ onClose, onCreated, gameId }) {
   const [boxes, setBoxes]             = useState([])
   const [boxId, setBoxId]             = useState('')
   const [packs, setPacks]             = useState([])
@@ -165,9 +167,10 @@ function NewOpeningModal({ onClose, onCreated }) {
     supabase
       .from('boxes')
       .select('id, name, set_name, box_type, pack_count, pack_msrp, purchase_price')
+      .eq('game_id', gameId)
       .order('purchased_at', { ascending: false })
       .then(({ data }) => setBoxes(data ?? []))
-  }, [])
+  }, [gameId])
 
   useEffect(() => {
     if (!boxId) { setPacks([]); return }
@@ -315,6 +318,8 @@ function NewOpeningModal({ onClose, onCreated }) {
 // Main YouTube page
 // ─────────────────────────────────────────
 export default function YouTube() {
+  const { activeGame } = useGame()
+  const config = gameConfig(activeGame.slug)
   const [openings, setOpenings]       = useState([])
   const [loading, setLoading]         = useState(true)
   const [showModal, setShowModal]     = useState(false)
@@ -335,7 +340,7 @@ export default function YouTube() {
   async function load() {
     setLoading(true)
     const [{ data }, { data: shortsData }] = await Promise.all([
-      supabase.from('v_youtube_opening_summary').select('*').order('filmed_at', { ascending: false }),
+      supabase.from('v_youtube_opening_summary').select('*').eq('game_id', activeGame.id).order('filmed_at', { ascending: false }),
       supabase.from('youtube_openings').select('id, shorts_url'),
     ])
     setOpenings(data ?? [])
@@ -402,7 +407,7 @@ export default function YouTube() {
     setPackLoading(false)
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [activeGame.id])
 
   function handleCreated(id) {
     setShowModal(false)
@@ -673,7 +678,7 @@ export default function YouTube() {
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
                 {/* Summary card */}
-                {openingMeta && <SummaryCard opening={openingMeta} packs={packData} />}
+                {openingMeta && <SummaryCard opening={openingMeta} packs={packData} config={config} />}
 
                 {/* Pack-by-pack breakdown */}
                 <div className="panel">
@@ -684,7 +689,7 @@ export default function YouTube() {
                   </div>
                   {packData.map(pack => {
                     const trackedVal = pack.cards.reduce((s, c) => s + (c.tcgplayer_market ?? 0) * c.quantity, 0)
-                    const packValue  = trackedVal + 1.00
+                    const packValue  = trackedVal + config.fillerCardValue
                     const packCost   = openingMeta?.pack_msrp ?? 5
                     const isProfit   = packValue >= packCost
                     return (
@@ -713,7 +718,7 @@ export default function YouTube() {
                                 <tr key={i}>
                                   <td style={{ paddingLeft: 24 }}>
                                     <a
-                                      href={`https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(card.name + ' Sorcery TCG')}&LH_Complete=1&LH_Sold=1&_sop=13`}
+                                      href={`https://www.ebay.com/sch/i.html?_nkw=${encodeURIComponent(card.name + ' ' + config.displayName)}&LH_Complete=1&LH_Sold=1&_sop=13`}
                                       target="_blank"
                                       rel="noreferrer"
                                       style={{ color: 'var(--text-primary)', fontWeight: 500, textDecoration: 'none', borderBottom: '1px dashed var(--border-mid)' }}
@@ -725,7 +730,7 @@ export default function YouTube() {
                                     <a
                                       href={card.tcgplayer_id
                                         ? `https://www.tcgplayer.com/product/${card.tcgplayer_id}`
-                                        : `https://www.tcgplayer.com/search/sorcery-contested-realm/product?q=${encodeURIComponent(card.name)}&view=grid`
+                                        : `https://www.tcgplayer.com/search/${config.tcgplayerSlug}/product?q=${encodeURIComponent(card.name)}&view=grid`
                                       }
                                       target="_blank"
                                       rel="noreferrer"
@@ -746,13 +751,13 @@ export default function YouTube() {
                               ))}
                             <tr style={{ opacity: 0.55 }}>
                               <td style={{ paddingLeft: 24, fontSize: 11, fontStyle: 'italic', color: 'var(--text-muted)' }}>
-                                Ordinary card est.
+                                Filler card est.
                               </td>
                               <td>
-                                <span className="badge badge-ordinary" style={{ fontSize: 10 }}>ordinary</span>
+                                <span className={`badge badge-${config.rarities[0]}`} style={{ fontSize: 10 }}>{config.rarities[0]}</span>
                               </td>
                               <td className="text-right" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                                $1.00
+                                {usd(config.fillerCardValue)}
                               </td>
                             </tr>
                           </tbody>
@@ -771,6 +776,7 @@ export default function YouTube() {
         <NewOpeningModal
           onClose={() => setShowModal(false)}
           onCreated={handleCreated}
+          gameId={activeGame.id}
         />
       )}
     </div>

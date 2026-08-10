@@ -1,16 +1,23 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
+import { useGame } from '../context/GameContext'
+import { gameConfig } from '../lib/games'
 
 const usd    = (n) => n == null ? '—' : `$${Number(n).toFixed(2)}`
 const fmtPnl = (n) => { if (n == null) return '—'; const v = Number(n); return `${v >= 0 ? '+$' : '-$'}${Math.abs(v).toFixed(2)}` }
+const cap    = (s) => s ? s.charAt(0).toUpperCase() + s.slice(1) : s
 
 const EBAY_FEE_PCT  = 0.129
 const EBAY_FEE_FLAT = 0.30
 const DEFAULT_SHIP  = 5.00
 const calcNet = (price) => price - (price * EBAY_FEE_PCT + EBAY_FEE_FLAT) - DEFAULT_SHIP
 
+const SOLO_COLORS = ['var(--gold-light)', 'var(--gold)', '#C9A84C', '#B08D3A']
+
 // ── Grouping logic ────────────────────────────────────────────
-function groupCards(cards) {
+function groupCards(cards, config) {
+  const { soloRarities = [], secondaryRarity = null, pooledSpecialType = null, pooledSpecialLabel = null } = config.grouping
+
   // Expand each card by available_qty so multiple owned copies can fill separate lots
   const expanded = cards.flatMap(c => {
     const qty = Math.max(1, Number(c.available_qty ?? 1))
@@ -18,14 +25,13 @@ function groupCards(cards) {
   })
 
   const groups = []
+  const isPooled = c => pooledSpecialType && c.card_type === pooledSpecialType
 
   // expanded is already pre-filtered by the available check; just split into tiers.
-  // Sites always go into site-specific pools regardless of rarity.
-  const sites       = expanded.filter(c => c.is_site && !c.foil)
-  const siteFoils   = expanded.filter(c => c.is_site &&  c.foil)
-  const uniqueCards = expanded.filter(c => c.rarity === 'unique' && !c.is_site)
-  const allFoils    = expanded.filter(c => c.foil && c.rarity !== 'unique' && !c.is_site)
-  const elites      = expanded.filter(c => !c.foil && c.rarity === 'elite' && !c.is_site)
+  // The pooled special type (e.g. Sorcery's "site" cards) always goes into its own
+  // pool regardless of rarity — collectors buy those lots specifically.
+  const pooled       = expanded.filter(c => isPooled(c) && !c.foil)
+  const pooledFoils  = expanded.filter(c => isPooled(c) &&  c.foil)
 
   // Helper: pack cards into lots of max 6, only emit if total >= $20
   function packIntoLots(cardList, tierLabel, color) {
@@ -77,19 +83,30 @@ function groupCards(cards) {
     }
   }
 
-  // 1. Uniques: foil and non-foil keep separate lots (high value, worth distinguishing)
-  packIntoLots(uniqueCards.filter(c =>  c.foil), 'Unique Foil', 'var(--gold-light)')
-  packIntoLots(uniqueCards.filter(c => !c.foil), 'Unique',      'var(--gold)')
+  // 1. Solo rarities (e.g. Sorcery's "unique", Riftbound's "epic"/"overnumbered"):
+  //    foil and non-foil keep separate lots — high value, worth distinguishing
+  soloRarities.forEach((rarity, i) => {
+    const color = SOLO_COLORS[i % SOLO_COLORS.length]
+    const rarityCards = expanded.filter(c => c.rarity === rarity && !isPooled(c))
+    packIntoLots(rarityCards.filter(c =>  c.foil), `${cap(rarity)} Foil`, color)
+    packIntoLots(rarityCards.filter(c => !c.foil), cap(rarity),          color)
+  })
 
-  // 2. Sites: their own pool regardless of rarity — collectors buy site lots
-  packIntoLots(siteFoils, 'Site Foil', '#7ADBA0')
-  packIntoLots(sites,     'Site',      '#5A9E78')
+  // 2. Pooled special type: their own pool regardless of rarity
+  if (pooledSpecialType) {
+    packIntoLots(pooledFoils, `${pooledSpecialLabel} Foil`, '#7ADBA0')
+    packIntoLots(pooled,      pooledSpecialLabel,           '#5A9E78')
+  }
 
-  // 3. All non-unique non-site foils pool together — reaching $20 is easier mixed
+  // 3. All remaining (non-solo, non-pooled) foils pool together — reaching $20 is easier mixed
+  const allFoils = expanded.filter(c => c.foil && !soloRarities.includes(c.rarity) && !isPooled(c))
   packIntoLots(allFoils, 'Foil', '#7AADEC')
 
-  // 4. Elite non-foils
-  packIntoLots(elites, 'Elite', '#9A9080')
+  // 4. Secondary rarity non-foils (one tier below the solo rarities)
+  if (secondaryRarity) {
+    const secondary = expanded.filter(c => !c.foil && c.rarity === secondaryRarity && !isPooled(c))
+    packIntoLots(secondary, cap(secondaryRarity), '#9A9080')
+  }
 
   return groups
 }
@@ -111,11 +128,11 @@ async function getAISuggestions(groups) {
 }
 
 // ── Create listing ────────────────────────────────────────────
-async function createListing(group, aiSuggestion) {
+async function createListing(group, aiSuggestion, config) {
   const title = aiSuggestion?.title || (
     group.cards.length === 1
-      ? `${group.cards[0].name}${group.cards[0].foil ? ' (Foil)' : ''} — Sorcery TCG Gothic`
-      : `Sorcery TCG Gothic Lot — ${group.tier} — ${group.cards.length} Cards`
+      ? `${group.cards[0].name}${group.cards[0].foil ? ' (Foil)' : ''} — ${config.displayName}${group.cards[0].set_name ? ` ${group.cards[0].set_name}` : ''}`
+      : `${config.displayName} Lot — ${group.tier} — ${group.cards.length} Cards`
   )
 
   const totalCostBasis = group.cards.reduce((s, c) => s + (c.cost_basis || 0), 0)
@@ -166,6 +183,8 @@ async function createListing(group, aiSuggestion) {
 
 // ── Main component ────────────────────────────────────────────
 export default function ListingSuggestions() {
+  const { activeGame } = useGame()
+  const config = gameConfig(activeGame.slug)
   const [cards, setCards]         = useState([])
   const [groups, setGroups]       = useState([])
   const [aiData, setAiData]       = useState([])
@@ -179,12 +198,17 @@ export default function ListingSuggestions() {
   useEffect(() => {
     async function load() {
       setLoading(true)
+      const { eligibleRarities, pooledSpecialType } = config.grouping
+
+      let orFilter = `rarity.in.(${eligibleRarities.join(',')}),foil.eq.true`
+      if (pooledSpecialType) orFilter += `,card_type.eq.${pooledSpecialType}`
 
       const [{ data, error: fetchErr }, { data: lotData }] = await Promise.all([
         supabase
           .from('v_inventory_dashboard')
           .select('id, name, set_name, rarity, foil, card_type, tcgplayer_market, cost_basis, quantity_owned, quantity_listed, quantity_available, active_listing_count')
-          .or('rarity.in.(unique,elite,exceptional),foil.eq.true,card_type.eq.site')
+          .eq('game_id', activeGame.id)
+          .or(orFilter)
           .gt('quantity_owned', 0)
           .order('tcgplayer_market', { ascending: false }),
         // Fetch card IDs in active lot listings (card_id is null on the listing itself)
@@ -202,7 +226,7 @@ export default function ListingSuggestions() {
         }
       }
 
-      // Filter: elite/unique, has truly available copies, has a price
+      // Filter: eligible rarity/foil/pooled type, has truly available copies, has a price
       // active_listing_count = active single-card ebay_listings (card_id is set)
       // lotListed = active lot listings from ebay_listing_cards
       // Don't use quantity_listed (cards table column) — createListing increments it for lot
@@ -212,28 +236,28 @@ export default function ListingSuggestions() {
         const singleList = Number(c.active_listing_count ?? 0)
         const lotListed  = lotListedMap[c.id] ?? 0
         const price      = Number(c.tcgplayer_market ?? 0)
-        return (c.rarity === 'elite' || c.rarity === 'unique' || c.foil || c.card_type === 'site') && owned > (singleList + lotListed) && price > 0
+        return (eligibleRarities.includes(c.rarity) || c.foil || (pooledSpecialType && c.card_type === pooledSpecialType)) && owned > (singleList + lotListed) && price > 0
       })
 
-      const withSite = available.map(c => {
+      const withPooled = available.map(c => {
         const owned      = Number(c.quantity_owned ?? 0)
         const singleList = Number(c.active_listing_count ?? 0)
         const lotListed  = lotListedMap[c.id] ?? 0
         return {
           ...c,
           card_id: c.id,
-          is_site: c.card_type === 'site',
+          is_pooled: Boolean(pooledSpecialType) && c.card_type === pooledSpecialType,
           available_qty: Math.max(0, owned - singleList - lotListed),
         }
       })
 
-      setCards(withSite)
-      const grouped = groupCards(withSite)
+      setCards(withPooled)
+      const grouped = groupCards(withPooled, config)
       setGroups(grouped)
       setLoading(false)
     }
     load()
-  }, [])
+  }, [activeGame.id])
 
   async function runAI() {
     if (!groups.length) return
@@ -250,7 +274,7 @@ export default function ListingSuggestions() {
   async function handleCreate(groupIdx) {
     setCreating(prev => ({ ...prev, [groupIdx]: true }))
     try {
-      await createListing(groups[groupIdx], aiData[groupIdx])
+      await createListing(groups[groupIdx], aiData[groupIdx], config)
       setCreated(prev => new Set([...prev, groupIdx]))
     } catch (e) {
       setError(`Failed to create listing: ${e.message}`)
@@ -353,7 +377,7 @@ export default function ListingSuggestions() {
         <div className="empty-state">
           <div className="empty-state-icon">{cards.length === 0 ? '📭' : '🎉'}</div>
           {cards.length === 0
-            ? 'No unlisted elite/unique/foil cards with TCGPlayer prices found — run a price check first.'
+            ? 'No unlisted high-rarity/foil cards with TCGPlayer prices found — run a price check first.'
             : 'All eligible cards are already listed on eBay!'}
         </div>
       ) : (
@@ -399,7 +423,7 @@ export default function ListingSuggestions() {
 
                     {/* AI title or default */}
                     <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-primary)', marginBottom: 4 }}>
-                      {ai?.title || `Sorcery TCG Gothic — ${group.tier} Lot (${group.cards.length} cards)`}
+                      {ai?.title || `${config.displayName} — ${group.tier} Lot (${group.cards.length} cards)`}
                     </div>
 
                     {/* AI note */}
@@ -427,7 +451,7 @@ export default function ListingSuggestions() {
                           onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--gold)'; e.currentTarget.style.color = 'var(--gold)' }}
                           onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.color = card.foil ? 'var(--gold-light)' : 'var(--text-secondary)' }}
                         >
-                          {card.name}{card.foil ? ' ✦' : ''}{card.is_site ? ' ⬡' : ''} · {usd(card.tcgplayer_market)}
+                          {card.name}{card.foil ? ' ✦' : ''}{card.is_pooled ? ' ⬡' : ''} · {usd(card.tcgplayer_market)}
                         </div>
                       ))}
                     </div>
