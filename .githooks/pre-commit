@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Blocks commits that contain a Supabase service_role JWT.
+#
+# Why this exists: schema.sql/views.sql snapshots are raw dumps that can
+# include pg_cron job definitions verbatim (including any Authorization
+# header hardcoded into a net.http_post call) — a service_role key leaked
+# into one of these on 2026-05-22 and sat in the public repo for months.
+# service_role bypasses every RLS policy, so it's the most sensitive
+# credential in this stack; anon/publishable keys are fine to commit.
+#
+# Install (one-time, per clone):
+#   git config core.hooksPath .githooks
+
+set -euo pipefail
+
+pattern='eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+'
+found=0
+
+while IFS= read -r file; do
+  [ -f "$file" ] || continue
+
+  while IFS= read -r token; do
+    [ -n "$token" ] || continue
+
+    payload=$(printf '%s' "$token" | cut -d. -f2 | tr '_-' '/+')
+    mod=$(( ${#payload} % 4 ))
+    if   [ "$mod" -eq 2 ]; then payload="${payload}=="
+    elif [ "$mod" -eq 3 ]; then payload="${payload}="
+    fi
+
+    decoded=$(printf '%s' "$payload" | base64 -d 2>/dev/null || true)
+
+    if printf '%s' "$decoded" | grep -q '"role"[[:space:]]*:[[:space:]]*"service_role"'; then
+      echo "✗ BLOCKED: $file contains a Supabase service_role JWT."
+      echo "  This key bypasses all RLS. Remove it (use Vault or an env var instead), then re-commit."
+      found=1
+    fi
+  done < <(grep -oE "$pattern" -- "$file" 2>/dev/null || true)
+done < <(git diff --cached --name-only --diff-filter=ACM)
+
+if [ "$found" -eq 1 ]; then
+  echo ""
+  echo "Commit aborted. To bypass in a genuine emergency: git commit --no-verify"
+  exit 1
+fi
+
+exit 0

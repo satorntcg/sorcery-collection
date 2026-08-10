@@ -4747,8 +4747,8 @@ COPY auth.webauthn_credentials (id, user_id, credential_id, public_key, attestat
 --
 
 COPY cron.job (jobid, schedule, command, nodename, nodeport, database, username, active, jobname) FROM stdin;
-1	0 6 * * *	\r\n    select net.http_post(\r\n      url     := 'https://fctyxspeishvjhlyfpbs.supabase.co/functions/v1/daily_price_check',\r\n      headers := '{"Authorization": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZjdHl4c3BlaXNodmpobHlmcGJzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3OTI5MTMwOCwiZXhwIjoyMDk0ODY3MzA4fQ.MGdQyh5OC2lg0WczoF_vnmG9XfOJZt_50LTufMcOOPw"}'::jsonb,\r\n      body    := '{}'::jsonb\r\n    );\r\n  	localhost	5432	postgres	postgres	t	daily-price-check
-2	0 8 * * 1	\r\n    select net.http_post(\r\n      url     := 'https://fctyxspeishvjhlyfpbs.supabase.co/functions/v1/weekly_summary',\r\n      headers := '{"Authorization": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZjdHl4c3BlaXNodmpobHlmcGJzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3OTI5MTMwOCwiZXhwIjoyMDk0ODY3MzA4fQ.MGdQyh5OC2lg0WczoF_vnmG9XfOJZt_50LTufMcOOPw"}'::jsonb,\r\n      body    := '{}'::jsonb\r\n    );\r\n  	localhost	5432	postgres	postgres	t	weekly-market-summary
+1	0 6 * * *	\r\n    select net.http_post(\r\n      url     := 'https://fctyxspeishvjhlyfpbs.supabase.co/functions/v1/daily_price_check',\r\n      headers := '{"Authorization": "<REDACTED_SERVICE_ROLE_KEY_ROTATE_IMMEDIATELY>"}'::jsonb,\r\n      body    := '{}'::jsonb\r\n    );\r\n  	localhost	5432	postgres	postgres	t	daily-price-check
+2	0 8 * * 1	\r\n    select net.http_post(\r\n      url     := 'https://fctyxspeishvjhlyfpbs.supabase.co/functions/v1/weekly_summary',\r\n      headers := '{"Authorization": "<REDACTED_SERVICE_ROLE_KEY_ROTATE_IMMEDIATELY>"}'::jsonb,\r\n      body    := '{}'::jsonb\r\n    );\r\n  	localhost	5432	postgres	postgres	t	weekly-market-summary
 \.
 
 
@@ -4757,8 +4757,8 @@ COPY cron.job (jobid, schedule, command, nodename, nodeport, database, username,
 --
 
 COPY cron.job_run_details (jobid, runid, job_pid, database, username, command, status, return_message, start_time, end_time) FROM stdin;
-1	1	43619	postgres	postgres	\r\n    select net.http_post(\r\n      url     := 'https://fctyxspeishvjhlyfpbs.supabase.co/functions/v1/daily_price_check',\r\n      headers := '{"Authorization": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZjdHl4c3BlaXNodmpobHlmcGJzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3OTI5MTMwOCwiZXhwIjoyMDk0ODY3MzA4fQ.MGdQyh5OC2lg0WczoF_vnmG9XfOJZt_50LTufMcOOPw"}'::jsonb,\r\n      body    := '{}'::jsonb\r\n    );\r\n  	succeeded	1 row	2026-05-21 06:00:00.193797+00	2026-05-21 06:00:00.233088+00
-1	2	111407	postgres	postgres	\r\n    select net.http_post(\r\n      url     := 'https://fctyxspeishvjhlyfpbs.supabase.co/functions/v1/daily_price_check',\r\n      headers := '{"Authorization": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZjdHl4c3BlaXNodmpobHlmcGJzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3OTI5MTMwOCwiZXhwIjoyMDk0ODY3MzA4fQ.MGdQyh5OC2lg0WczoF_vnmG9XfOJZt_50LTufMcOOPw"}'::jsonb,\r\n      body    := '{}'::jsonb\r\n    );\r\n  	succeeded	1 row	2026-05-22 06:00:00.18191+00	2026-05-22 06:00:00.229705+00
+1	1	43619	postgres	postgres	\r\n    select net.http_post(\r\n      url     := 'https://fctyxspeishvjhlyfpbs.supabase.co/functions/v1/daily_price_check',\r\n      headers := '{"Authorization": "<REDACTED_SERVICE_ROLE_KEY_ROTATE_IMMEDIATELY>"}'::jsonb,\r\n      body    := '{}'::jsonb\r\n    );\r\n  	succeeded	1 row	2026-05-21 06:00:00.193797+00	2026-05-21 06:00:00.233088+00
+1	2	111407	postgres	postgres	\r\n    select net.http_post(\r\n      url     := 'https://fctyxspeishvjhlyfpbs.supabase.co/functions/v1/daily_price_check',\r\n      headers := '{"Authorization": "<REDACTED_SERVICE_ROLE_KEY_ROTATE_IMMEDIATELY>"}'::jsonb,\r\n      body    := '{}'::jsonb\r\n    );\r\n  	succeeded	1 row	2026-05-22 06:00:00.18191+00	2026-05-22 06:00:00.229705+00
 \.
 
 
