@@ -44,6 +44,8 @@ export default function Dashboard() {
   const [inventory, setInventory] = useState([])
   const [alerts, setAlerts]       = useState([])
   const [loading, setLoading]     = useState(true)
+  const [pnl, setPnl]             = useState(null)
+  const [boxCosts, setBoxCosts]   = useState(null)
 
   useEffect(() => {
     async function load() {
@@ -68,6 +70,13 @@ export default function Dashboard() {
     load()
   }, [])
 
+  useEffect(() => {
+    supabase.from('v_combined_pnl').select('*').single().then(({ data }) => setPnl(data))
+    supabase.from('boxes').select('purchase_price').then(({ data }) => {
+      if (data) setBoxCosts(data.reduce((s, b) => s + (b.purchase_price || 0), 0))
+    })
+  }, [])
+
   async function dismissAlert(id) {
     await supabase.from('price_alerts').update({ dismissed: true }).eq('id', id)
     setAlerts(prev => prev.filter(a => a.id !== id))
@@ -80,6 +89,10 @@ export default function Dashboard() {
     .filter(c => c.tcgplayer_market)
     .sort((a, b) => Math.abs(getUnrealizedPnl(b) ?? 0) - Math.abs(getUnrealizedPnl(a) ?? 0))
     .slice(0, 6)
+
+  const totalNetProfit = pnl ? Number(pnl.total_net_profit) : 0
+  const totalCogs       = pnl ? Number(pnl.total_cogs) : 0
+  const businessProfit  = pnl && boxCosts != null ? totalNetProfit - (boxCosts - totalCogs) : null
 
   if (loading) return <div className="loading">Loading dashboard…</div>
 
@@ -122,6 +135,45 @@ export default function Dashboard() {
 
       {/* Weekly movers widget */}
       <WeeklyMovers />
+
+      {/* Business P&L — combines eBay + TCGPlayer so box costs aren't double-counted per channel */}
+      {pnl && (
+        <div className="panel mb-16">
+          <div className="panel-header">
+            <span className="panel-title">Business P&L</span>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>eBay + TCGPlayer combined</span>
+          </div>
+          <div style={{ padding: '16px' }}>
+            <div className="metrics-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)', marginBottom: 16 }}>
+              <div className="metric-card">
+                <div className="metric-label">Total revenue</div>
+                <div className="metric-value gold">{usd(pnl.total_revenue)}</div>
+              </div>
+              <div className="metric-card">
+                <div className="metric-label">Fees + shipping paid</div>
+                <div className="metric-value">{usd(pnl.total_fees + Number(pnl.total_shipping_paid ?? 0))}</div>
+              </div>
+              <div className="metric-card">
+                <div className="metric-label">Cost of goods sold</div>
+                <div className="metric-value">{usd(pnl.total_cogs)}</div>
+              </div>
+              <div className="metric-card">
+                <div className="metric-label">Remaining inventory cost</div>
+                <div className="metric-value">{boxCosts != null ? usd(boxCosts - totalCogs) : '…'}</div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 4px 0' }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)' }}>Business net profit</div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>revenue − fees − shipping − box costs</div>
+              </div>
+              <div className="metric-value" style={{ fontSize: 28, color: businessProfit == null ? 'var(--text-primary)' : businessProfit >= 0 ? 'var(--success)' : 'var(--danger)' }}>
+                {businessProfit != null ? formatPnl(businessProfit) : '…'}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Active alerts */}
       <div className="panel mb-16">

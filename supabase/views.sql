@@ -143,6 +143,7 @@ CREATE OR REPLACE VIEW public.v_tcgplayer_active AS
     tl.title,
     tl.card_id,
     tl.listed_price,
+    tl.shipping_cost,
     tl.condition,
     tl.quantity,
     tl.notes,
@@ -169,14 +170,16 @@ CREATE OR REPLACE VIEW public.v_tcgplayer_active AS
      LEFT JOIN tcgplayer_listing_cards tlc ON ((tlc.listing_id = tl.id)))
      LEFT JOIN cards c2 ON ((c2.id = tlc.card_id)))
   WHERE (tl.status = 'active'::text)
-  GROUP BY tl.id, tl.title, tl.card_id, tl.listed_price, tl.condition, tl.quantity, tl.notes, tl.tcgplayer_url, tl.listed_at, tl.status, tl.cost_basis, tl.tcg_fee, tl.net_listed, c.name, c.set_name, c.rarity, c.foil, lp.tcgplayer_market;
+  GROUP BY tl.id, tl.title, tl.card_id, tl.listed_price, tl.shipping_cost, tl.condition, tl.quantity, tl.notes, tl.tcgplayer_url, tl.listed_at, tl.status, tl.cost_basis, tl.tcg_fee, tl.net_listed, c.name, c.set_name, c.rarity, c.foil, lp.tcgplayer_market;
 
 CREATE OR REPLACE VIEW public.v_tcgplayer_sold AS
  SELECT tl.id,
     tl.title,
     tl.listed_price,
+    tl.shipping_cost,
     tl.quantity,
     tl.sold_price,
+    tl.sold_shipping,
     tl.sold_fee,
     tl.cost_basis,
     tl.net_profit,
@@ -202,12 +205,13 @@ CREATE OR REPLACE VIEW public.v_tcgplayer_sold AS
      LEFT JOIN tcgplayer_listing_cards tlc ON ((tlc.listing_id = tl.id)))
      LEFT JOIN cards lc_cards ON ((lc_cards.id = tlc.card_id)))
   WHERE (tl.status = 'sold'::text)
-  GROUP BY tl.id, tl.title, tl.listed_price, tl.quantity, tl.sold_price, tl.sold_fee, tl.cost_basis, tl.net_profit, tl.sold_at, tl.listed_at, tl.condition, tl.notes, tl.tcgplayer_url, tl.card_id, c.name, c.set_name, c.rarity, c.foil
+  GROUP BY tl.id, tl.title, tl.listed_price, tl.shipping_cost, tl.quantity, tl.sold_price, tl.sold_shipping, tl.sold_fee, tl.cost_basis, tl.net_profit, tl.sold_at, tl.listed_at, tl.condition, tl.notes, tl.tcgplayer_url, tl.card_id, c.name, c.set_name, c.rarity, c.foil
   ORDER BY tl.sold_at DESC;
 
 CREATE OR REPLACE VIEW public.v_tcgplayer_pnl AS
  SELECT COALESCE(sum(sold_price) FILTER (WHERE (status = 'sold'::text)), (0)::numeric) AS total_revenue,
     COALESCE(sum(sold_fee) FILTER (WHERE (status = 'sold'::text)), (0)::numeric) AS total_tcg_fees,
+    COALESCE(sum(sold_shipping) FILTER (WHERE (status = 'sold'::text)), (0)::numeric) AS total_shipping_paid,
     COALESCE(sum(cost_basis) FILTER (WHERE (status = 'sold'::text)), (0)::numeric) AS total_cogs,
     COALESCE(sum(net_profit) FILTER (WHERE (status = 'sold'::text)), (0)::numeric) AS total_net_profit,
     count(*) FILTER (WHERE (status = 'active'::text)) AS active_listings_count,
@@ -216,6 +220,25 @@ CREATE OR REPLACE VIEW public.v_tcgplayer_pnl AS
     count(*) FILTER (WHERE (status = 'sold'::text)) AS total_sold,
     count(*) AS total_listings
    FROM tcgplayer_listings;
+
+-- Combines eBay + TCGPlayer P&L so "business profit" (revenue − fees − box costs) can be
+-- computed once against combined COGS, instead of once per channel against the full box
+-- spend (which double-counted cards sold through the other channel as still-unsold stock).
+CREATE OR REPLACE VIEW public.v_combined_pnl AS
+ SELECT
+    (eb.total_revenue + tc.total_revenue) AS total_revenue,
+    eb.total_ebay_fees,
+    tc.total_tcg_fees,
+    (eb.total_ebay_fees + tc.total_tcg_fees) AS total_fees,
+    (eb.total_shipping_paid + tc.total_shipping_paid) AS total_shipping_paid,
+    (eb.total_cogs + tc.total_cogs) AS total_cogs,
+    (eb.total_net_profit + tc.total_net_profit) AS total_net_profit,
+    (eb.active_listings_count + tc.active_listings_count) AS active_listings_count,
+    (eb.active_listings_gmv + tc.active_listings_gmv) AS active_listings_gmv,
+    (eb.active_listings_net_if_sold + tc.active_listings_net_if_sold) AS active_listings_net_if_sold,
+    (eb.total_sold + tc.total_sold) AS total_sold,
+    (eb.total_listings + tc.total_listings) AS total_listings
+   FROM v_global_pnl eb, v_tcgplayer_pnl tc;
 
 CREATE OR REPLACE VIEW public.v_inventory_dashboard AS
  SELECT DISTINCT ON (c.id) c.id,

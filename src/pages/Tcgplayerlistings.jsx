@@ -1,9 +1,11 @@
 import { useState, useEffect, useCallback } from 'react'
+import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
 const TCG_FEE_PCT = 0.1025
+const TCG_SHIP_DEFAULT = '5.00'
 const calcFee = (price) => price * TCG_FEE_PCT
-const calcNet = (price, fee) => price - fee
+const calcNet = (price, shipping, fee) => price - fee - shipping
 const usd    = (n) => n == null ? '—' : `$${Number(n).toFixed(2)}`
 const fmtPnl = (n) => { if (n == null) return '—'; const v = Number(n); return `${v >= 0 ? '+$' : '-$'}${Math.abs(v).toFixed(2)}` }
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'
@@ -16,6 +18,7 @@ function CreateModal({ cards, onClose, onSaved }) {
   const [cardQtys, setCardQtys]       = useState({}) // cardId -> qty per lot
   const [prices, setPrices]           = useState({})
   const [title, setTitle]             = useState('')
+  const [shipping, setShipping]       = useState(TCG_SHIP_DEFAULT)
   const [condition, setCondition]     = useState('Near Mint')
   const [tcgUrl, setTcgUrl]           = useState('')
   const [notes, setNotes]             = useState('')
@@ -65,8 +68,9 @@ function CreateModal({ cards, onClose, onSaved }) {
   }
 
   const totalPrice     = selectedCards.reduce((s, c) => s + (parseFloat(prices[c.card_id]) || 0) * (cardQtys[c.card_id] ?? 1), 0)
+  const s              = parseFloat(shipping) || 0
   const fee            = calcFee(totalPrice)
-  const net            = calcNet(totalPrice, fee)
+  const net            = calcNet(totalPrice, s, fee)
   const totalCostBasis = selectedCards.reduce((s, c) => s + (c.cost_basis || 0) * (cardQtys[c.card_id] ?? 1), 0)
   const estProfit      = totalPrice > 0 ? net - totalCostBasis : null
   const totalQtyInLot  = selectedIds.reduce((s, id) => s + (cardQtys[id] ?? 1), 0)
@@ -82,6 +86,7 @@ function CreateModal({ cards, onClose, onSaved }) {
         card_id:        isSingleCard ? selectedIds[0] : null,
         title:          title.trim(),
         listed_price:   parseFloat(totalPrice.toFixed(2)),
+        shipping_cost:  s,
         condition,
         quantity:       listingQty,
         notes:          notes.trim() || null,
@@ -227,8 +232,8 @@ function CreateModal({ cards, onClose, onSaved }) {
 
             {/* Fee preview */}
             {totalPrice > 0 && (
-              <div className="metrics-grid mb-16" style={{ gridTemplateColumns: 'repeat(3, 1fr)', marginBottom: 16 }}>
-                {[['TCGPlayer fee (10.25%)', usd(fee), ''], ['Net proceeds', usd(net), net >= 0 ? 'success' : 'danger'], ['Est. profit', estProfit != null ? fmtPnl(estProfit) : '—', estProfit != null ? (estProfit >= 0 ? 'success' : 'danger') : '']].map(([label, val, cls]) => (
+              <div className="metrics-grid mb-16" style={{ gridTemplateColumns: 'repeat(4, 1fr)', marginBottom: 16 }}>
+                {[['TCGPlayer fee (10.25%)', usd(fee), ''], ['Shipping', usd(s), ''], ['Net proceeds', usd(net), net >= 0 ? 'success' : 'danger'], ['Est. profit', estProfit != null ? fmtPnl(estProfit) : '—', estProfit != null ? (estProfit >= 0 ? 'success' : 'danger') : '']].map(([label, val, cls]) => (
                   <div key={label} className="metric-card">
                     <div className="metric-label">{label}</div>
                     <div className={`metric-value ${cls}`} style={{ fontSize: 18 }}>{val}</div>
@@ -242,6 +247,10 @@ function CreateModal({ cards, onClose, onSaved }) {
               <input className="form-input" type="text" value={title} onChange={e => setTitle(e.target.value)} />
             </div>
             <div className="form-row">
+              <div className="form-group">
+                <label className="form-label">Shipping ($)</label>
+                <input className="form-input" type="number" min="0" step="0.01" value={shipping} onChange={e => setShipping(e.target.value)} />
+              </div>
               <div className="form-group">
                 <label className="form-label">Qty listed</label>
                 <input className="form-input" type="number" min="1" step="1" value={quantity} onChange={e => setQuantity(e.target.value)} style={{ textAlign: 'center' }} />
@@ -280,13 +289,15 @@ function CreateModal({ cards, onClose, onSaved }) {
 // ── Sold modal ───────────────────────────────────────────────
 function SoldModal({ listing, onClose, onSaved }) {
   const isEdit = listing.status === 'sold'
-  const [soldPrice, setSoldPrice] = useState(String(listing.sold_price ?? listing.listed_price ?? ''))
-  const [saving, setSaving]       = useState(false)
-  const [error, setError]         = useState('')
+  const [soldPrice, setSoldPrice]       = useState(String(listing.sold_price ?? listing.listed_price ?? ''))
+  const [soldShipping, setSoldShipping] = useState(String(listing.sold_shipping ?? listing.shipping_cost ?? TCG_SHIP_DEFAULT))
+  const [saving, setSaving]             = useState(false)
+  const [error, setError]               = useState('')
 
   const sp = parseFloat(soldPrice) || 0
+  const ss = parseFloat(soldShipping) || 0
   const fee = calcFee(sp)
-  const net = calcNet(sp, fee)
+  const net = calcNet(sp, ss, fee)
   // True profit = net proceeds minus cost basis
   const profit = listing.cost_basis != null ? net - listing.cost_basis : net
 
@@ -296,9 +307,10 @@ function SoldModal({ listing, onClose, onSaved }) {
     try {
       const trueProfit = listing.cost_basis != null ? net - listing.cost_basis : net
       const update = {
-        sold_price: sp,
-        sold_fee:   parseFloat(fee.toFixed(2)),
-        net_profit: parseFloat(trueProfit.toFixed(2)),
+        sold_price:    sp,
+        sold_shipping: ss,
+        sold_fee:      parseFloat(fee.toFixed(2)),
+        net_profit:    parseFloat(trueProfit.toFixed(2)),
       }
       // Only set status + sold_at if marking sold for the first time
       if (!isEdit) {
@@ -342,15 +354,25 @@ function SoldModal({ listing, onClose, onSaved }) {
         </div>
         <div className="modal-body">
           <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16 }}>{listing.title}</div>
-          <div className="form-group">
-            <label className="form-label">Sold price ($)</label>
-            <input className="form-input" type="number" min="0" step="0.01" value={soldPrice} onChange={e => setSoldPrice(e.target.value)} />
+          <div className="form-row">
+            <div className="form-group">
+              <label className="form-label">Sold price ($)</label>
+              <input className="form-input" type="number" min="0" step="0.01" value={soldPrice} onChange={e => setSoldPrice(e.target.value)} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Actual shipping ($)</label>
+              <input className="form-input" type="number" min="0" step="0.01" value={soldShipping} onChange={e => setSoldShipping(e.target.value)} />
+            </div>
           </div>
 
-          <div className="metrics-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+          <div className="metrics-grid" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
             <div className="metric-card">
               <div className="metric-label">TCGPlayer fee</div>
               <div className="metric-value" style={{ fontSize: 18, color: 'var(--danger)' }}>{usd(fee)}</div>
+            </div>
+            <div className="metric-card">
+              <div className="metric-label">Shipping cost</div>
+              <div className="metric-value" style={{ fontSize: 18, color: 'var(--danger)' }}>{usd(ss)}</div>
             </div>
             <div className="metric-card">
               <div className="metric-label">Net proceeds</div>
@@ -382,6 +404,7 @@ function SoldModal({ listing, onClose, onSaved }) {
 function EditModal({ listing, cards, onClose, onSaved }) {
   const [title, setTitle]           = useState(listing.title)
   const [price, setPrice]           = useState(String(listing.listed_price))
+  const [shipping, setShipping]     = useState(String(listing.shipping_cost ?? TCG_SHIP_DEFAULT))
   const [condition, setCondition]   = useState(listing.condition)
   const [quantity, setQuantity]     = useState(listing.quantity ?? 1)
   const [tcgUrl, setTcgUrl]         = useState(listing.tcgplayer_url || '')
@@ -417,8 +440,8 @@ function EditModal({ listing, cards, onClose, onSaved }) {
     loadLinked()
   }, [listing.id])
 
-  const p = parseFloat(price) || 0
-  const fee = calcFee(p); const net = calcNet(p, fee)
+  const p = parseFloat(price) || 0; const s = parseFloat(shipping) || 0
+  const fee = calcFee(p); const net = calcNet(p, s, fee)
 
   const filteredCards = cardSearch.length > 1
     ? (cards || []).filter(c =>
@@ -452,6 +475,7 @@ function EditModal({ listing, cards, onClose, onSaved }) {
       const { error: err } = await supabase.from('tcgplayer_listings').update({
         title:            title.trim(),
         listed_price:     p,
+        shipping_cost:    s,
         condition,
         quantity:         Math.max(1, parseInt(quantity) || 1),
         tcgplayer_url:    tcgUrl.trim() || null,
@@ -508,6 +532,12 @@ function EditModal({ listing, cards, onClose, onSaved }) {
               <label className="form-label">Price ($)</label>
               <input className="form-input" type="number" min="0" step="0.01" value={price} onChange={e => setPrice(e.target.value)} />
             </div>
+            <div className="form-group">
+              <label className="form-label">Shipping ($)</label>
+              <input className="form-input" type="number" min="0" step="0.01" value={shipping} onChange={e => setShipping(e.target.value)} />
+            </div>
+          </div>
+          <div className="form-row">
             <div className="form-group">
               <label className="form-label">Condition</label>
               <select className="form-select" value={condition} onChange={e => setCondition(e.target.value)}>
@@ -806,11 +836,12 @@ function exportListingsCSV(listings, label) {
     const s = String(v ?? '')
     return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s
   }
-  const headers = ['Title', 'Cards', 'Price', 'TCG Fee', 'Net', 'Days Listed', 'Listed Date', 'TCGPlayer URL']
+  const headers = ['Title', 'Cards', 'Price', 'Shipping', 'TCG Fee', 'Net', 'Days Listed', 'Listed Date', 'TCGPlayer URL']
   const rows = listings.map(l => [
     l.card_name || l.title,
     l.all_card_names && l.card_count > 1 ? l.all_card_names : '',
     l.listed_price != null ? Number(l.listed_price).toFixed(2) : '',
+    l.shipping_cost != null ? Number(l.shipping_cost).toFixed(2) : '',
     l.tcg_fee != null ? Number(l.tcg_fee).toFixed(2) : '',
     l.net_listed != null ? Number(l.net_listed).toFixed(2) : '',
     l.days_listed ?? '',
@@ -837,7 +868,6 @@ export default function TcgplayerListings() {
   const [cards, setCards]             = useState([])
   const [pnl, setPnl]                 = useState(null)
   const [loading, setLoading]         = useState(true)
-  const [boxCosts, setBoxCosts]       = useState(null)
   const [showCreate, setShowCreate]   = useState(false)
   const [editTarget, setEditTarget]   = useState(null)
   const [soldTarget, setSoldTarget]   = useState(null)
@@ -879,11 +909,6 @@ export default function TcgplayerListings() {
   }, [])
 
   useEffect(() => { fetchAll() }, [fetchAll])
-  useEffect(() => {
-    supabase.from('boxes').select('purchase_price').then(({ data }) => {
-      if (data) setBoxCosts(data.reduce((s, b) => s + (b.purchase_price || 0), 0))
-    })
-  }, [])
 
   const onSaved = () => {
     fetchAll()
@@ -921,8 +946,6 @@ export default function TcgplayerListings() {
   const SortIcon = ({ col }) => <span style={{ opacity: sortBy === col ? 1 : 0.25, fontSize: 10, marginLeft: 3 }}>{sortBy === col ? (sortDir === 'asc' ? '↑' : '↓') : '⇅'}</span>
 
   const totalNetProfit = pnl ? Number(pnl.total_net_profit) : 0
-  const totalCogs      = pnl ? Number(pnl.total_cogs) : 0
-  const businessProfit = pnl && boxCosts != null ? totalNetProfit - (boxCosts - totalCogs) : null
 
   return (
     <div className="page">
@@ -945,7 +968,7 @@ export default function TcgplayerListings() {
       </div>
 
       {/* Summary metrics */}
-      <div className="metrics-grid" style={{ gridTemplateColumns: 'repeat(6, 1fr)' }}>
+      <div className="metrics-grid" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
         <div className="metric-card">
           <div className="metric-label">Active listings</div>
           <div className="metric-value">{pnl?.active_listings_count ?? '—'}</div>
@@ -965,13 +988,6 @@ export default function TcgplayerListings() {
         <div className="metric-card">
           <div className="metric-label">Net profit (sold)</div>
           <div className="metric-value" style={{ color: totalNetProfit >= 0 ? 'var(--success)' : 'var(--danger)' }}>{fmtPnl(totalNetProfit)}</div>
-        </div>
-        <div className="metric-card">
-          <div className="metric-label">Business profit</div>
-          <div className="metric-value" style={{ color: businessProfit == null ? 'var(--text-primary)' : businessProfit >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-            {businessProfit != null ? fmtPnl(businessProfit) : '…'}
-          </div>
-          <div className="metric-sub">revenue − fees − boxes</div>
         </div>
       </div>
 
@@ -1023,6 +1039,7 @@ export default function TcgplayerListings() {
                     <th>Cards in lot</th>
                     <th onClick={() => toggleSort('quantity')} style={{ cursor: 'pointer', textAlign: 'right' }}>Qty <SortIcon col="quantity" /></th>
                     <th onClick={() => toggleSort('listed_price')} style={{ cursor: 'pointer', textAlign: 'right' }}>Price <SortIcon col="listed_price" /></th>
+                    <th onClick={() => toggleSort('shipping_cost')} style={{ cursor: 'pointer', textAlign: 'right' }}>Shipping <SortIcon col="shipping_cost" /></th>
                     <th style={{ textAlign: 'right' }}>TCG fee</th>
                     <th onClick={() => toggleSort('net_listed')} style={{ cursor: 'pointer', textAlign: 'right' }}>Net <SortIcon col="net_listed" /></th>
                     <th onClick={() => toggleSort('days_listed')} style={{ cursor: 'pointer', textAlign: 'right' }}>Days <SortIcon col="days_listed" /></th>
@@ -1049,6 +1066,7 @@ export default function TcgplayerListings() {
                         {l.quantity ?? 1}
                       </td>
                       <td className="text-right text-gold">{usd(l.listed_price)}</td>
+                      <td className="text-right text-muted">{usd(l.shipping_cost)}</td>
                       <td className="text-right text-muted">{usd(l.tcg_fee)}</td>
                       <td className={`text-right ${l.net_listed >= 0 ? 'text-success' : 'text-danger'}`} style={{ fontWeight: 500 }}>{usd(l.net_listed)}</td>
                       <td className="text-right text-muted">{Math.floor((Date.now() - new Date(l.listed_at)) / 86400000)}d</td>
@@ -1073,6 +1091,7 @@ export default function TcgplayerListings() {
                     <th>Cards in lot</th>
                     <th style={{ textAlign: 'right' }}>Qty</th>
                     <th onClick={() => toggleSort('sold_price')} style={{ cursor: 'pointer', textAlign: 'right' }}>Sold for <SortIcon col="sold_price" /></th>
+                    <th style={{ textAlign: 'right' }}>Shipping</th>
                     <th style={{ textAlign: 'right' }}>TCG fee</th>
                     <th style={{ textAlign: 'right' }}>Cost basis</th>
                     <th onClick={() => toggleSort('net_profit')} style={{ cursor: 'pointer', textAlign: 'right' }}>Net profit <SortIcon col="net_profit" /></th>
@@ -1098,6 +1117,7 @@ export default function TcgplayerListings() {
                       </td>
                       <td className="text-right text-muted" style={{ fontSize: 13 }}>{l.quantity ?? 1}</td>
                       <td className="text-right text-gold">{usd(l.sold_price)}</td>
+                      <td className="text-right text-muted">{usd(l.sold_shipping)}</td>
                       <td className="text-right text-muted">{usd(l.sold_fee)}</td>
                       <td className="text-right text-muted">{usd(l.cost_basis)}</td>
                       <td style={{ textAlign: 'right', fontWeight: 500, color: Number(l.net_profit) >= 0 ? 'var(--success)' : 'var(--danger)' }}>{fmtPnl(l.net_profit)}</td>
@@ -1122,8 +1142,7 @@ export default function TcgplayerListings() {
       {tab === 'pnl' && pnl && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
           {[
-            { heading: 'TCGPlayer sales', rows: [['Total revenue', usd(pnl.total_revenue), 'gold'], ['TCGPlayer fees paid', usd(pnl.total_tcg_fees), ''], ['Cost of goods', usd(pnl.total_cogs), ''], ['Net profit', fmtPnl(totalNetProfit), totalNetProfit >= 0 ? 'success' : 'danger']] },
-            { heading: 'Box inventory', rows: [['Total box spend', boxCosts != null ? usd(boxCosts) : '…', ''], ['Cost of sold cards', usd(pnl.total_cogs), ''], ['Remaining inventory cost', boxCosts != null ? usd(boxCosts - totalCogs) : '…', '']] },
+            { heading: 'TCGPlayer sales', rows: [['Total revenue', usd(pnl.total_revenue), 'gold'], ['TCGPlayer fees paid', usd(pnl.total_tcg_fees), ''], ['Shipping paid', usd(pnl.total_shipping_paid), ''], ['Cost of goods', usd(pnl.total_cogs), ''], ['Net profit', fmtPnl(totalNetProfit), totalNetProfit >= 0 ? 'success' : 'danger']] },
             { heading: 'Active pipeline', rows: [['Active listings', pnl.active_listings_count, ''], ['Listed GMV', usd(pnl.active_listings_gmv), 'gold'], ['Net if all sell', usd(pnl.active_listings_net_if_sold), 'gold']] },
           ].map(({ heading, rows }) => (
             <div key={heading}>
@@ -1139,17 +1158,10 @@ export default function TcgplayerListings() {
             </div>
           ))}
 
-          {/* Bottom line */}
-          <div className="panel">
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 24px' }}>
-              <div>
-                <div className="panel-title">Business net profit</div>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>TCGPlayer revenue − fees − box costs</div>
-              </div>
-              <div className="metric-value" style={{ fontSize: 32, color: businessProfit == null ? 'var(--text-primary)' : businessProfit >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-                {businessProfit != null ? fmtPnl(businessProfit) : '…'}
-              </div>
-            </div>
+          <div className="alert-item" style={{ padding: '10px 14px' }}>
+            <span className="alert-content" style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              Business profit (revenue − fees − box costs) combines both sales channels and lives on the <Link to="/" style={{ color: 'var(--gold)', textDecoration: 'none', borderBottom: '1px dashed var(--gold)' }}>Dashboard</Link> — box inventory is shared, so it can't be netted against one channel's numbers alone.
+            </span>
           </div>
         </div>
       )}

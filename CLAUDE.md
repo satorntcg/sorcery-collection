@@ -48,7 +48,7 @@ Tables referenced by the UI:
 - `price_alerts` — generated alerts: `card_id, alert_type, message, old_price, new_price, pct_change, dismissed`
 - `ebay_listings` — outbound listings: `card_id, title, listed_price, shipping_cost, condition, ebay_fee, net_listed, status, ebay_url, notes, cost_basis`; sold fields: `sold_price, sold_shipping, sold_ebay_fee, net_profit, sold_at`
 - `ebay_listing_cards` — junction for multi-card listings: `listing_id, card_id, price, quantity`
-- `tcgplayer_listings` — TCGPlayer channel listings, same shape/lifecycle as `ebay_listings` minus shipping: `card_id, title, listed_price, condition, quantity, tcg_fee, net_listed, status, tcgplayer_url, notes, cost_basis`; sold fields: `sold_price, sold_fee, net_profit, sold_at`. `tcg_fee`/`net_listed` are generated columns using a flat 10.25% commission (no separate payment-processing fee tracked)
+- `tcgplayer_listings` — TCGPlayer channel listings, same shape/lifecycle as `ebay_listings`: `card_id, title, listed_price, shipping_cost, condition, quantity, tcg_fee, net_listed, status, tcgplayer_url, notes, cost_basis`; sold fields: `sold_price, sold_shipping, sold_fee, net_profit, sold_at`. `tcg_fee`/`net_listed` are generated columns using a flat 10.25% commission minus `shipping_cost` (no separate payment-processing fee tracked). `shipping_cost` defaults to `$5.00`
 - `tcgplayer_listing_cards` — junction for multi-card TCGPlayer listings: `listing_id, card_id, price, quantity`
 - `boxes` — sealed product purchases: `name, set_name, set_code, box_type, purchase_price, pack_count, pack_msrp, purchased_at, opened_at, seller, notes, box_ref` (`box_ref` is a unique slug used for import linking)
 - `packs` — individual packs within a box: `box_id, pack_number, opened_at, notes, pack_ref` (`pack_ref` is a unique slug used for import linking)
@@ -73,6 +73,7 @@ Views the UI reads from (heavier joins/aggregations live in Postgres, not the cl
 - `v_price_gainers_losers` — 7-day price movers per card: `card_id, name, rarity, foil, current_price, price_7d_ago, pct_change`
 - `v_tcgplayer_active` / `v_tcgplayer_sold` — active/sold TCGPlayer listings joined with card + lot info (mirrors `v_ebay_active`/`v_ebay_sold`)
 - `v_tcgplayer_pnl` — aggregate TCGPlayer revenue/fees/profit (mirrors `v_global_pnl`)
+- `v_combined_pnl` — `v_global_pnl` (eBay) + `v_tcgplayer_pnl` (TCGPlayer) summed into one row. Used only by `Dashboard.jsx` for the "Business net profit" panel, since that figure nets revenue against *all* box spend — computing it per-channel double-counted box costs (a card sold on one channel still looked like unsold stock in the other channel's math). The `Ebaylistings.jsx`/`Tcgplayerlistings.jsx` Business P&L tabs show channel-scoped revenue/fees/COGS only and link to the Dashboard for the combined number
 
 When adding a feature that needs joined data, prefer creating/extending a view over composing joins in JS.
 
@@ -92,7 +93,7 @@ Fee constants in this file (`EBAY_FEE_PCT = 0.129`, `EBAY_FEE_FLAT = 0.30`, `DEF
 
 ### TCGPlayer Listings (Tcgplayerlistings.jsx)
 
-A second listing channel, structurally identical to `Ebaylistings.jsx` (2-step create modal, edit/sold/end/link/delete-sold modals) but backed by its own tables (`tcgplayer_listings`, `tcgplayer_listing_cards`) and views (`v_tcgplayer_active`, `v_tcgplayer_sold`, `v_tcgplayer_pnl`) rather than the eBay ones. Differences from the eBay page: no shipping field (TCGPlayer sellers typically fold shipping into the listed price), a flat `TCG_FEE_PCT = 0.1025` commission instead of eBay's fee formula, and a `tcgplayer_url` field instead of `ebay_url`. Marking a listing sold decrements the same `cards.quantity_owned`/`quantity_listed` columns eBay sales do, so inventory reflects both channels together — `quantity_listed` is not channel-specific.
+A second listing channel, structurally identical to `Ebaylistings.jsx` (2-step create modal, edit/sold/end/link/delete-sold modals, `shipping_cost`/`sold_shipping` fields) but backed by its own tables (`tcgplayer_listings`, `tcgplayer_listing_cards`) and views (`v_tcgplayer_active`, `v_tcgplayer_sold`, `v_tcgplayer_pnl`) rather than the eBay ones. Differences from the eBay page: shipping defaults to `$5.00` (`TCG_SHIP_DEFAULT`) rather than eBay's `$0`/`$4` defaults, a flat `TCG_FEE_PCT = 0.1025` commission instead of eBay's fee formula, and a `tcgplayer_url` field instead of `ebay_url`. Marking a listing sold decrements the same `cards.quantity_owned`/`quantity_listed` columns eBay sales do, so inventory reflects both channels together — `quantity_listed` is not channel-specific.
 
 ### YouTube page (YouTube.jsx)
 

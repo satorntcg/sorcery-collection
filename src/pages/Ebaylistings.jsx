@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useSearchParams, Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
 const ebayItemNum = url => url?.match(/\/itm\/(\d+)/)?.[1] ?? null
@@ -885,7 +885,6 @@ export default function EbayListings() {
   const [cards, setCards]       = useState([])
   const [pnl, setPnl]           = useState(null)
   const [loading, setLoading]   = useState(true)
-  const [boxCosts, setBoxCosts] = useState(null)
   const [showCreate, setShowCreate] = useState(false)
   const [editTarget, setEditTarget] = useState(null)
   const [soldTarget, setSoldTarget] = useState(null)
@@ -948,11 +947,6 @@ export default function EbayListings() {
   }, [])
 
   useEffect(() => { fetchAll() }, [fetchAll])
-  useEffect(() => {
-    supabase.from('boxes').select('purchase_price').then(({ data }) => {
-      if (data) setBoxCosts(data.reduce((s, b) => s + (b.purchase_price || 0), 0))
-    })
-  }, [])
 
   const onSaved = () => {
     fetchAll()
@@ -996,8 +990,6 @@ export default function EbayListings() {
   const SortIcon = ({ col }) => <span style={{ opacity: sortBy === col ? 1 : 0.25, fontSize: 10, marginLeft: 3 }}>{sortBy === col ? (sortDir === 'asc' ? '↑' : '↓') : '⇅'}</span>
 
   const totalNetProfit = pnl ? Number(pnl.total_net_profit) : 0
-  const totalCogs      = pnl ? Number(pnl.total_cogs) : 0
-  const businessProfit = pnl && boxCosts != null ? totalNetProfit - (boxCosts - totalCogs) : null
 
   return (
     <div className="page">
@@ -1020,7 +1012,7 @@ export default function EbayListings() {
       </div>
 
       {/* Summary metrics */}
-      <div className="metrics-grid" style={{ gridTemplateColumns: 'repeat(6, 1fr)' }}>
+      <div className="metrics-grid" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
         <div className="metric-card">
           <div className="metric-label">Active listings</div>
           <div className="metric-value">{pnl?.active_listings_count ?? '—'}</div>
@@ -1040,13 +1032,6 @@ export default function EbayListings() {
         <div className="metric-card">
           <div className="metric-label">Net profit (sold)</div>
           <div className="metric-value" style={{ color: totalNetProfit >= 0 ? 'var(--success)' : 'var(--danger)' }}>{fmtPnl(totalNetProfit)}</div>
-        </div>
-        <div className="metric-card">
-          <div className="metric-label">Business profit</div>
-          <div className="metric-value" style={{ color: businessProfit == null ? 'var(--text-primary)' : businessProfit >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-            {businessProfit != null ? fmtPnl(businessProfit) : '…'}
-          </div>
-          <div className="metric-sub">revenue − fees − boxes</div>
         </div>
       </div>
 
@@ -1236,7 +1221,6 @@ export default function EbayListings() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
           {[
             { heading: 'eBay sales', rows: [['Total revenue', usd(pnl.total_revenue), 'gold'], ['eBay fees paid', usd(pnl.total_ebay_fees), ''], ['Shipping paid', usd(pnl.total_shipping_paid), ''], ['Cost of goods', usd(pnl.total_cogs), ''], ['Net profit', fmtPnl(totalNetProfit), totalNetProfit >= 0 ? 'success' : 'danger']] },
-            { heading: 'Box inventory', rows: [['Total box spend', boxCosts != null ? usd(boxCosts) : '…', ''], ['Cost of sold cards', usd(pnl.total_cogs), ''], ['Remaining inventory cost', boxCosts != null ? usd(boxCosts - totalCogs) : '…', '']] },
             { heading: 'Active pipeline', rows: [['Active listings', pnl.active_listings_count, ''], ['Listed GMV', usd(pnl.active_listings_gmv), 'gold'], ['Net if all sell', usd(pnl.active_listings_net_if_sold), 'gold']] },
           ].map(({ heading, rows }) => (
             <div key={heading}>
@@ -1252,17 +1236,10 @@ export default function EbayListings() {
             </div>
           ))}
 
-          {/* Bottom line */}
-          <div className="panel">
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px 24px' }}>
-              <div>
-                <div className="panel-title">Business net profit</div>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>eBay revenue − fees − shipping − box costs</div>
-              </div>
-              <div className="metric-value" style={{ fontSize: 32, color: businessProfit == null ? 'var(--text-primary)' : businessProfit >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-                {businessProfit != null ? fmtPnl(businessProfit) : '…'}
-              </div>
-            </div>
+          <div className="alert-item" style={{ padding: '10px 14px' }}>
+            <span className="alert-content" style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              Business profit (revenue − fees − box costs) combines both sales channels and lives on the <Link to="/" style={{ color: 'var(--gold)', textDecoration: 'none', borderBottom: '1px dashed var(--gold)' }}>Dashboard</Link> — box inventory is shared, so it can't be netted against one channel's numbers alone.
+            </span>
           </div>
         </div>
       )}
