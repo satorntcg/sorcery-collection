@@ -99,7 +99,12 @@ The app tracks multiple TCGs (Sorcery, Riftbound, more later) in one shared sche
 
 ### Pricing pipeline
 
-The pricing pipeline runs in Supabase, not the browser. The Market page can manually invoke the Edge Function at `${VITE_SUPABASE_URL}/functions/v1/daily_price_check` (POST, bearer = anon key) to force a price refresh. The schedule is configured via the `check_schedule` row in the Settings page. The Edge Function source lives at `supabase/functions/daily_price_check/index.ts`.
+Two independent pieces feed `price_snapshots`, neither aware of the other:
+
+- **TCGPlayer prices** — populated by an external **Google Apps Script** (runs on its own daily trigger inside Google's infrastructure, not Supabase). A reference copy lives at `apps-script/tcg-price-pipeline.gs` (paste into the Apps Script editor to deploy; it is not executed from this repo). It pulls Sorcery + Riftbound catalog/price data from `tcgcsv.com`, stages it in a "Prices" Google Sheet, then upserts into `price_snapshots.tcgplayer_low/mid/market` by matching `cards.tcgplayer_id`. It also has a manually-run `seedCardsFromTcgPlayer()` to insert new cards (setting `game_id` via a `games` table lookup — the script resolves `game_id` at runtime since `cards` has no plain `game` text column). Auth is a Supabase **service role key** stored in the script's Properties Service, so it bypasses RLS entirely.
+- **eBay prices** — populated by the Supabase Edge Function at `supabase/functions/daily_price_check/index.ts`, invoked via the Market page (`${VITE_SUPABASE_URL}/functions/v1/daily_price_check`, POST, bearer = anon key) or its own schedule. Despite the name, it does **not** call TCGPlayer — it only backfills `ebay_sold_avg/low/high/count` on rows that already have `tcgplayer_market` set (i.e. it runs after the Apps Script). The schedule is configured via the `check_schedule` row in the Settings page.
+
+Both are already game-agnostic at the `price_snapshots` level (matched by `card_id`, not `game_id` — that table has no game column of its own). `daily_price_check/index.ts` does still hardcode "Sorcery TCG" in its eBay search query strings and email branding — those would need updating for Riftbound eBay price coverage.
 
 ### Listing Suggestions + AI (Listingsuggestions.jsx)
 

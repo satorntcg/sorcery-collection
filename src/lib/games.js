@@ -36,7 +36,7 @@ export const GAME_CONFIG = {
     displayName: 'Riftbound',
     rarities: ['common', 'uncommon', 'rare', 'epic', 'overnumbered'],
     cardTypes: ['champion', 'legend', 'unit', 'rune', 'spell', 'gear', 'battlefield', 'token'],
-    sets: ['Origins', 'Other'],
+    sets: ['Origins', 'Spiritforged', 'Unleashed', 'Vendetta', 'Other'],
     defaultSet: 'Origins',
     defaultRarity: 'rare',
     // Best-guess TCGPlayer product-line slug — verify once a Riftbound card is
