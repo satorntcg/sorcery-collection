@@ -8,7 +8,11 @@ dist/
 .env
 .env.*
 !.env.example
-supabase/.temp/
+# **/.temp/ (not just supabase/.temp/) so an accidental nested
+# `supabase/supabase/.temp/` from running the CLI in the wrong
+# directory is caught too, not just the top-level one.
+**/.temp/
+supabase/supabase/
 
 # Logs
 npm-debug.log*
