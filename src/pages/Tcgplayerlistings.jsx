@@ -93,7 +93,6 @@ function CreateModal({ cards, config, onClose, onSaved }) {
         quantity:       listingQty,
         notes:          notes.trim() || null,
         tcgplayer_url:  tcgUrl.trim() || null,
-        cost_basis:     totalCostBasis > 0 ? parseFloat(totalCostBasis.toFixed(4)) : null,
         status:         'active',
       }).select('id').single()
       if (err) throw err
@@ -295,23 +294,53 @@ function SoldModal({ listing, onClose, onSaved }) {
   const [soldShipping, setSoldShipping] = useState(String(listing.sold_shipping ?? listing.shipping_cost ?? TCG_SHIP_DEFAULT))
   const [saving, setSaving]             = useState(false)
   const [error, setError]               = useState('')
+  // Cost basis isn't stored at listing-creation time anymore — for a first-time sale it's
+  // computed live from the linked cards' current cost basis, then frozen into the row so
+  // historical profit stays stable afterward. Editing an existing sale keeps that frozen value.
+  const [costBasis, setCostBasis]       = useState(isEdit ? (listing.cost_basis ?? null) : null)
+  const [loadingCostBasis, setLoadingCostBasis] = useState(!isEdit)
+
+  useEffect(() => {
+    if (isEdit) return
+    let cancelled = false
+    async function loadCostBasis() {
+      setLoadingCostBasis(true)
+      let total = 0
+      if (listing.card_id) {
+        const { data } = await supabase.from('v_latest_prices').select('cost_basis').eq('card_id', listing.card_id).maybeSingle()
+        total = Number(data?.cost_basis) || 0
+      } else {
+        const { data: lotCards } = await supabase.from('tcgplayer_listing_cards').select('card_id, quantity').eq('listing_id', listing.id)
+        const ids = (lotCards ?? []).map(lc => lc.card_id)
+        if (ids.length) {
+          const { data: prices } = await supabase.from('v_latest_prices').select('card_id, cost_basis').in('card_id', ids)
+          const byId = Object.fromEntries((prices ?? []).map(p => [p.card_id, Number(p.cost_basis) || 0]))
+          total = (lotCards ?? []).reduce((s, lc) => s + (byId[lc.card_id] ?? 0) * (lc.quantity ?? 1), 0)
+        }
+      }
+      if (!cancelled) { setCostBasis(total > 0 ? total : null); setLoadingCostBasis(false) }
+    }
+    loadCostBasis()
+    return () => { cancelled = true }
+  }, [listing.id, listing.card_id, isEdit])
 
   const sp = parseFloat(soldPrice) || 0
   const ss = parseFloat(soldShipping) || 0
   const fee = calcFee(sp)
   const net = calcNet(sp, ss, fee)
   // True profit = net proceeds minus cost basis
-  const profit = listing.cost_basis != null ? net - listing.cost_basis : net
+  const profit = costBasis != null ? net - costBasis : net
 
   async function handleSave() {
     if (!sp) { setError('Enter the sold price.'); return }
     setSaving(true); setError('')
     try {
-      const trueProfit = listing.cost_basis != null ? net - listing.cost_basis : net
+      const trueProfit = costBasis != null ? net - costBasis : net
       const update = {
         sold_price:    sp,
         sold_shipping: ss,
         sold_fee:      parseFloat(fee.toFixed(2)),
+        cost_basis:    costBasis != null ? parseFloat(costBasis.toFixed(4)) : null,
         net_profit:    parseFloat(trueProfit.toFixed(2)),
       }
       // Only set status + sold_at if marking sold for the first time
@@ -383,9 +412,9 @@ function SoldModal({ listing, onClose, onSaved }) {
             <div className="metric-card">
               <div className="metric-label">True profit</div>
               <div className="metric-value" style={{ fontSize: 18, color: profit == null ? 'var(--text-primary)' : profit >= 0 ? 'var(--success)' : 'var(--danger)' }}>
-                {profit != null ? fmtPnl(profit) : '—'}
+                {loadingCostBasis ? '…' : profit != null ? fmtPnl(profit) : '—'}
               </div>
-              {listing.cost_basis != null && <div className="metric-sub">after cost basis {usd(listing.cost_basis)}</div>}
+              {costBasis != null && <div className="metric-sub">after cost basis {usd(costBasis)}</div>}
             </div>
           </div>
 
@@ -393,8 +422,8 @@ function SoldModal({ listing, onClose, onSaved }) {
         </div>
         <div className="modal-footer">
           <button className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
-            {saving ? 'Saving…' : isEdit ? 'Save changes' : 'Confirm sale'}
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving || loadingCostBasis}>
+            {saving ? 'Saving…' : loadingCostBasis ? 'Loading…' : isEdit ? 'Save changes' : 'Confirm sale'}
           </button>
         </div>
       </div>

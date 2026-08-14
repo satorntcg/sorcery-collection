@@ -3698,31 +3698,52 @@ ALTER VIEW public.v_active_alerts OWNER TO postgres;
 -- Name: v_latest_prices; Type: VIEW; Schema: public; Owner: postgres
 --
 
+-- 2026-08-14: rewritten to fall back to the manually-entered cards.cost_basis for
+-- cards not linked to a tracked box, and to average cost basis across boxes via a
+-- CTE instead of an inline join that cross-multiplied pack_cards x price_snapshots.
+-- Also brought current with the 2026-08-10 multi-game migration's game_id column,
+-- which this snapshot had drifted out of sync with. See
+-- supabase/migrations/20260814_fix_cost_basis.sql.
 CREATE VIEW public.v_latest_prices AS
- SELECT DISTINCT ON (c.id) c.id AS card_id,
+ WITH latest_snapshot AS (
+         SELECT DISTINCT ON (ps.card_id) ps.card_id,
+            ps.tcgplayer_market,
+            ps.tcgplayer_low,
+            ps.ebay_sold_avg,
+            ps.ebay_sold_low,
+            ps.ebay_sold_high,
+            ps.ebay_sold_count,
+            ps.checked_at
+           FROM public.price_snapshots ps
+          ORDER BY ps.card_id, ps.checked_at DESC
+        ), box_cost AS (
+         SELECT pc.card_id,
+            round((sum((b.purchase_price / (b.pack_count)::numeric / 15.0) * (pc.quantity)::numeric) / sum(pc.quantity)), 4) AS avg_cost_basis
+           FROM ((public.pack_cards pc
+             JOIN public.packs pk ON ((pk.id = pc.pack_id)))
+             JOIN public.boxes b ON ((b.id = pk.box_id)))
+          WHERE ((b.purchase_price IS NOT NULL) AND (b.pack_count > 0))
+          GROUP BY pc.card_id
+        )
+ SELECT c.id AS card_id,
     c.name,
     c.set_name,
     c.rarity,
     c.foil,
+    c.game_id,
     c.tcgplayer_id,
-    ps.tcgplayer_market,
-    ps.tcgplayer_low,
-    ps.ebay_sold_avg,
-    ps.ebay_sold_low,
-    ps.ebay_sold_high,
-    ps.ebay_sold_count,
-    ps.checked_at,
-        CASE
-            WHEN ((b.purchase_price IS NOT NULL) AND (b.pack_count > 0)) THEN round(((b.purchase_price / (b.pack_count)::numeric) / 15.0), 4)
-            ELSE NULL::numeric
-        END AS cost_basis,
-    ps.tcgplayer_market AS tcg_market_price
-   FROM ((((public.cards c
-     LEFT JOIN public.pack_cards pc ON ((pc.card_id = c.id)))
-     LEFT JOIN public.packs pk ON ((pk.id = pc.pack_id)))
-     LEFT JOIN public.boxes b ON ((b.id = pk.box_id)))
-     LEFT JOIN public.price_snapshots ps ON ((ps.card_id = c.id)))
-  ORDER BY c.id, ps.checked_at DESC;
+    ls.tcgplayer_market,
+    ls.tcgplayer_low,
+    ls.ebay_sold_avg,
+    ls.ebay_sold_low,
+    ls.ebay_sold_high,
+    ls.ebay_sold_count,
+    ls.checked_at,
+    COALESCE(bc.avg_cost_basis, c.cost_basis) AS cost_basis,
+    ls.tcgplayer_market AS tcg_market_price
+   FROM ((public.cards c
+     LEFT JOIN latest_snapshot ls ON ((ls.card_id = c.id)))
+     LEFT JOIN box_cost bc ON ((bc.card_id = c.id)));
 
 
 ALTER VIEW public.v_latest_prices OWNER TO postgres;
@@ -3731,6 +3752,11 @@ ALTER VIEW public.v_latest_prices OWNER TO postgres;
 -- Name: v_box_pnl; Type: VIEW; Schema: public; Owner: postgres
 --
 
+-- 2026-08-14: brought current with the live view -- added b.game_id (2026-08-10
+-- multi-game migration, this snapshot had drifted), the "+ packs_opened * 1.00"
+-- filler-card adjustment, and quantity-weighted market value (sum(lp.tcgplayer_market)
+-- previously ignored pack_cards.quantity; see
+-- supabase/migrations/20260814_fix_pack_quantity_weighting.sql).
 CREATE VIEW public.v_box_pnl AS
  SELECT b.id,
     b.name,
@@ -3743,24 +3769,25 @@ CREATE VIEW public.v_box_pnl AS
     b.opened_at,
     b.seller,
     b.notes,
+    b.game_id,
     count(DISTINCT pk.id) AS packs_opened,
-    count(pc.id) AS cards_pulled,
+    COALESCE(sum(pc.quantity), (0)::bigint) AS cards_pulled,
     count(DISTINCT pc.card_id) AS distinct_cards_pulled,
-    COALESCE(sum(lp.tcgplayer_market), (0)::numeric) AS cards_market_value,
+    (COALESCE(sum((lp.tcgplayer_market * pc.quantity)), (0)::numeric) + ((count(DISTINCT pk.id))::numeric * 1.00)) AS cards_market_value,
         CASE
             WHEN ((b.purchase_price IS NOT NULL) AND (b.pack_count > 0)) THEN round(((b.purchase_price / (b.pack_count)::numeric) / 15.0), 4)
             ELSE NULL::numeric
         END AS cost_per_card,
-    (COALESCE(sum(lp.tcgplayer_market), (0)::numeric) - COALESCE(b.purchase_price, (0)::numeric)) AS gross_pnl,
+    ((COALESCE(sum((lp.tcgplayer_market * pc.quantity)), (0)::numeric) + ((count(DISTINCT pk.id))::numeric * 1.00)) - COALESCE(b.purchase_price, (0)::numeric)) AS gross_pnl,
         CASE
-            WHEN (COALESCE(b.purchase_price, (0)::numeric) > (0)::numeric) THEN round((((COALESCE(sum(lp.tcgplayer_market), (0)::numeric) - b.purchase_price) / b.purchase_price) * (100)::numeric), 1)
+            WHEN (COALESCE(b.purchase_price, (0)::numeric) > (0)::numeric) THEN round(((((COALESCE(sum((lp.tcgplayer_market * pc.quantity)), (0)::numeric) + ((count(DISTINCT pk.id))::numeric * 1.00)) - b.purchase_price) / b.purchase_price) * (100)::numeric), 1)
             ELSE NULL::numeric
         END AS roi_pct
    FROM (((public.boxes b
      LEFT JOIN public.packs pk ON ((pk.box_id = b.id)))
      LEFT JOIN public.pack_cards pc ON ((pc.pack_id = pk.id)))
      LEFT JOIN public.v_latest_prices lp ON ((lp.card_id = pc.card_id)))
-  GROUP BY b.id, b.name, b.set_name, b.box_type, b.purchase_price, b.pack_count, b.pack_msrp, b.purchased_at, b.opened_at, b.seller, b.notes
+  GROUP BY b.id, b.name, b.set_name, b.box_type, b.purchase_price, b.pack_count, b.pack_msrp, b.purchased_at, b.opened_at, b.seller, b.notes, b.game_id
   ORDER BY b.purchased_at DESC;
 
 
@@ -3819,14 +3846,19 @@ ALTER VIEW public.v_global_pnl OWNER TO postgres;
 -- Name: v_inventory_dashboard; Type: VIEW; Schema: public; Owner: postgres
 --
 
+-- 2026-08-14: brought current with the live view -- added c.game_id (2026-08-10
+-- multi-game migration) and c.card_type (this snapshot had drifted out of sync on
+-- both; see supabase/migrations/20260814_add_card_type_to_inventory_dashboard.sql).
+-- Column names/DISTINCT ON also corrected to match snapshots/views.sql.
 CREATE VIEW public.v_inventory_dashboard AS
- SELECT c.id AS card_id,
+ SELECT DISTINCT ON (c.id) c.id,
     c.name,
     c.set_name,
     c.set_code,
     c.rarity,
     c.condition,
     c.foil,
+    c.game_id,
     c.tcgplayer_id,
     c.image_url,
     c.notes,
@@ -3843,7 +3875,7 @@ CREATE VIEW public.v_inventory_dashboard AS
     lp.ebay_sold_count,
     lp.checked_at AS price_checked_at,
     lp.cost_basis,
-    round((COALESCE(lp.tcgplayer_market, (0)::numeric) * (c.quantity_owned)::numeric), 2) AS total_market_value,
+    round((COALESCE(lp.tcgplayer_market, (0)::numeric) * (c.quantity_owned)::numeric), 2) AS market_value,
         CASE
             WHEN ((lp.tcgplayer_market IS NOT NULL) AND (lp.cost_basis IS NOT NULL)) THEN round((lp.tcgplayer_market - lp.cost_basis), 4)
             ELSE NULL::numeric
@@ -3851,9 +3883,10 @@ CREATE VIEW public.v_inventory_dashboard AS
         CASE
             WHEN ((lp.tcgplayer_market IS NOT NULL) AND (lp.cost_basis IS NOT NULL)) THEN round(((lp.tcgplayer_market - lp.cost_basis) * (c.quantity_owned)::numeric), 2)
             ELSE NULL::numeric
-        END AS unrealized_pnl_total,
+        END AS unrealized_pnl,
     COALESCE(el.active_listing_count, (0)::bigint) AS active_listing_count,
-    el.lowest_listed_price
+    el.lowest_listed_price,
+    c.card_type
    FROM ((public.cards c
      LEFT JOIN public.v_latest_prices lp ON ((lp.card_id = c.id)))
      LEFT JOIN ( SELECT ebay_listings.card_id,
@@ -3862,7 +3895,7 @@ CREATE VIEW public.v_inventory_dashboard AS
            FROM public.ebay_listings
           WHERE (ebay_listings.status = 'active'::text)
           GROUP BY ebay_listings.card_id) el ON ((el.card_id = c.id)))
-  ORDER BY c.name;
+  ORDER BY c.id, c.name;
 
 
 ALTER VIEW public.v_inventory_dashboard OWNER TO postgres;
@@ -3871,6 +3904,9 @@ ALTER VIEW public.v_inventory_dashboard OWNER TO postgres;
 -- Name: v_pack_pnl; Type: VIEW; Schema: public; Owner: postgres
 --
 
+-- 2026-08-14: brought current with the live view -- added b.game_id (2026-08-10
+-- multi-game migration, this snapshot had drifted) and quantity-weighted market
+-- value (see supabase/migrations/20260814_fix_pack_quantity_weighting.sql).
 CREATE VIEW public.v_pack_pnl AS
  SELECT pk.id AS pack_id,
     pk.box_id,
@@ -3881,13 +3917,14 @@ CREATE VIEW public.v_pack_pnl AS
     b.set_name,
     b.purchase_price,
     b.pack_count,
+    b.game_id,
         CASE
             WHEN ((b.purchase_price IS NOT NULL) AND (b.pack_count > 0)) THEN round((b.purchase_price / (b.pack_count)::numeric), 4)
             ELSE NULL::numeric
         END AS pack_cost,
-    count(pc.id) AS cards_pulled,
-    COALESCE(sum(lp.tcgplayer_market), (0)::numeric) AS market_value,
-    (COALESCE(sum(lp.tcgplayer_market), (0)::numeric) -
+    COALESCE(sum(pc.quantity), (0)::bigint) AS cards_pulled,
+    (COALESCE(sum((lp.tcgplayer_market * pc.quantity)), (0)::numeric) + 1.00) AS market_value,
+    ((COALESCE(sum((lp.tcgplayer_market * pc.quantity)), (0)::numeric) + 1.00) -
         CASE
             WHEN ((b.purchase_price IS NOT NULL) AND (b.pack_count > 0)) THEN round((b.purchase_price / (b.pack_count)::numeric), 4)
             ELSE (0)::numeric
@@ -3896,7 +3933,7 @@ CREATE VIEW public.v_pack_pnl AS
      JOIN public.boxes b ON ((b.id = pk.box_id)))
      LEFT JOIN public.pack_cards pc ON ((pc.pack_id = pk.id)))
      LEFT JOIN public.v_latest_prices lp ON ((lp.card_id = pc.card_id)))
-  GROUP BY pk.id, pk.box_id, pk.pack_number, pk.opened_at, pk.notes, b.name, b.set_name, b.purchase_price, b.pack_count
+  GROUP BY pk.id, pk.box_id, pk.pack_number, pk.opened_at, pk.notes, b.name, b.set_name, b.purchase_price, b.pack_count, b.game_id
   ORDER BY pk.opened_at DESC;
 
 
@@ -3961,6 +3998,9 @@ ALTER TABLE public.youtube_openings OWNER TO postgres;
 -- Name: v_youtube_opening_summary; Type: VIEW; Schema: public; Owner: postgres
 --
 
+-- 2026-08-14: brought current with the live view -- added b.game_id (2026-08-10
+-- multi-game migration, this snapshot had drifted) and quantity-weighted market
+-- value (see supabase/migrations/20260814_fix_pack_quantity_weighting.sql).
 CREATE VIEW public.v_youtube_opening_summary AS
  SELECT yo.id,
     yo.title,
@@ -3973,15 +4013,16 @@ CREATE VIEW public.v_youtube_opening_summary AS
     b.pack_count,
     b.pack_msrp,
     b.purchase_price AS box_cost,
+    b.game_id,
     count(DISTINCT yop.pack_id) AS packs_in_video,
-    count(pc.id) AS cards_pulled,
-    COALESCE(sum(lp.tcgplayer_market), (0)::numeric) AS total_tcg_value,
-    COALESCE(sum(lp.tcgplayer_market), (0)::numeric) AS market_value,
+    COALESCE(sum(pc.quantity), (0)::bigint) AS cards_pulled,
+    (COALESCE(sum((lp.tcgplayer_market * pc.quantity)), (0)::numeric) + ((count(DISTINCT yop.pack_id))::numeric * 1.00)) AS total_tcg_value,
+    (COALESCE(sum((lp.tcgplayer_market * pc.quantity)), (0)::numeric) + ((count(DISTINCT yop.pack_id))::numeric * 1.00)) AS market_value,
     COALESCE(((count(DISTINCT yop.pack_id))::numeric * COALESCE(b.pack_msrp, (5)::numeric)), (0)::numeric) AS packs_cost,
-    (COALESCE(sum(lp.tcgplayer_market), (0)::numeric) - COALESCE(((count(DISTINCT yop.pack_id))::numeric * COALESCE(b.pack_msrp, (5)::numeric)), (0)::numeric)) AS opening_pnl,
+    ((COALESCE(sum((lp.tcgplayer_market * pc.quantity)), (0)::numeric) + ((count(DISTINCT yop.pack_id))::numeric * 1.00)) - COALESCE(((count(DISTINCT yop.pack_id))::numeric * COALESCE(b.pack_msrp, (5)::numeric)), (0)::numeric)) AS opening_pnl,
     max(lp.tcgplayer_market) AS best_card_value,
         CASE
-            WHEN (((count(DISTINCT yop.pack_id))::numeric * COALESCE(b.pack_msrp, (5)::numeric)) > (0)::numeric) THEN round((((COALESCE(sum(lp.tcgplayer_market), (0)::numeric) - ((count(DISTINCT yop.pack_id))::numeric * COALESCE(b.pack_msrp, (5)::numeric))) / ((count(DISTINCT yop.pack_id))::numeric * COALESCE(b.pack_msrp, (5)::numeric))) * (100)::numeric), 1)
+            WHEN (((count(DISTINCT yop.pack_id))::numeric * COALESCE(b.pack_msrp, (5)::numeric)) > (0)::numeric) THEN round(((((COALESCE(sum((lp.tcgplayer_market * pc.quantity)), (0)::numeric) + ((count(DISTINCT yop.pack_id))::numeric * 1.00)) - ((count(DISTINCT yop.pack_id))::numeric * COALESCE(b.pack_msrp, (5)::numeric))) / ((count(DISTINCT yop.pack_id))::numeric * COALESCE(b.pack_msrp, (5)::numeric))) * (100)::numeric), 1)
             ELSE NULL::numeric
         END AS roi_pct
    FROM (((((public.youtube_openings yo
@@ -3990,7 +4031,7 @@ CREATE VIEW public.v_youtube_opening_summary AS
      LEFT JOIN public.packs pk ON ((pk.id = yop.pack_id)))
      LEFT JOIN public.pack_cards pc ON ((pc.pack_id = pk.id)))
      LEFT JOIN public.v_latest_prices lp ON ((lp.card_id = pc.card_id)))
-  GROUP BY yo.id, yo.title, yo.youtube_url, yo.filmed_at, yo.notes, b.id, b.name, b.set_name, b.pack_count, b.pack_msrp, b.purchase_price
+  GROUP BY yo.id, yo.title, yo.youtube_url, yo.filmed_at, yo.notes, b.id, b.name, b.set_name, b.pack_count, b.pack_msrp, b.purchase_price, b.game_id
   ORDER BY yo.filmed_at DESC;
 
 

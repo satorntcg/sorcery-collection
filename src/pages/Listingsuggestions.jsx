@@ -135,7 +135,6 @@ async function createListing(group, aiSuggestion, config) {
       : `${config.displayName} Lot — ${group.tier} — ${group.cards.length} Cards`
   )
 
-  const totalCostBasis = group.cards.reduce((s, c) => s + (c.cost_basis || 0), 0)
   const cardBreakdown  = group.cards.map(c => `${c.name} ($${(c.tcgplayer_market || 0).toFixed(2)})`).join(', ')
 
   const { data: listing, error } = await supabase.from('ebay_listings').insert({
@@ -145,7 +144,6 @@ async function createListing(group, aiSuggestion, config) {
     shipping_cost: DEFAULT_SHIP,
     condition:     'Near Mint',
     notes:         `Cards: ${cardBreakdown}\nAI note: ${aiSuggestion?.note || ''}`,
-    cost_basis:    totalCostBasis > 0 ? parseFloat(totalCostBasis.toFixed(4)) : null,
     status:        'active',
   }).select('id').single()
 

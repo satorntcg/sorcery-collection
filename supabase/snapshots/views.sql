@@ -34,6 +34,10 @@ CREATE OR REPLACE VIEW public.v_active_alerts AS
   WHERE ((pa.dismissed = false) AND (pa.alert_type = ANY (ARRAY['price_spike'::alert_type, 'price_drop'::alert_type])))
   ORDER BY pa.created_at DESC;
 
+-- 2026-08-14: sum(lp.tcgplayer_market) previously ignored pack_cards.quantity, so a
+-- pack with more than one copy of the same card (Boxes.jsx supports recording that)
+-- had its market value/PnL/ROI undercounted. See
+-- supabase/migrations/20260814_fix_pack_quantity_weighting.sql.
 CREATE OR REPLACE VIEW public.v_box_pnl AS
  SELECT b.id,
     b.name,
@@ -48,16 +52,16 @@ CREATE OR REPLACE VIEW public.v_box_pnl AS
     b.notes,
     b.game_id,
     count(DISTINCT pk.id) AS packs_opened,
-    count(pc.id) AS cards_pulled,
+    COALESCE(sum(pc.quantity), (0)::bigint) AS cards_pulled,
     count(DISTINCT pc.card_id) AS distinct_cards_pulled,
-    (COALESCE(sum(lp.tcgplayer_market), (0)::numeric) + ((count(DISTINCT pk.id))::numeric * 1.00)) AS cards_market_value,
+    (COALESCE(sum((lp.tcgplayer_market * pc.quantity)), (0)::numeric) + ((count(DISTINCT pk.id))::numeric * 1.00)) AS cards_market_value,
         CASE
             WHEN ((b.purchase_price IS NOT NULL) AND (b.pack_count > 0)) THEN round(((b.purchase_price / (b.pack_count)::numeric) / 15.0), 4)
             ELSE NULL::numeric
         END AS cost_per_card,
-    ((COALESCE(sum(lp.tcgplayer_market), (0)::numeric) + ((count(DISTINCT pk.id))::numeric * 1.00)) - COALESCE(b.purchase_price, (0)::numeric)) AS gross_pnl,
+    ((COALESCE(sum((lp.tcgplayer_market * pc.quantity)), (0)::numeric) + ((count(DISTINCT pk.id))::numeric * 1.00)) - COALESCE(b.purchase_price, (0)::numeric)) AS gross_pnl,
         CASE
-            WHEN (COALESCE(b.purchase_price, (0)::numeric) > (0)::numeric) THEN round(((((COALESCE(sum(lp.tcgplayer_market), (0)::numeric) + ((count(DISTINCT pk.id))::numeric * 1.00)) - b.purchase_price) / b.purchase_price) * (100)::numeric), 1)
+            WHEN (COALESCE(b.purchase_price, (0)::numeric) > (0)::numeric) THEN round(((((COALESCE(sum((lp.tcgplayer_market * pc.quantity)), (0)::numeric) + ((count(DISTINCT pk.id))::numeric * 1.00)) - b.purchase_price) / b.purchase_price) * (100)::numeric), 1)
             ELSE NULL::numeric
         END AS roi_pct
    FROM (((boxes b
@@ -253,6 +257,9 @@ CREATE OR REPLACE VIEW public.v_combined_pnl AS
     (eb.total_listings + tc.total_listings) AS total_listings
    FROM v_global_pnl eb, v_tcgplayer_pnl tc;
 
+-- 2026-08-14: added c.card_type (appended at the end -- CREATE OR REPLACE VIEW can't
+-- reorder existing columns). Listingsuggestions.jsx needs it to find each game's
+-- pooled-special card type. See supabase/migrations/20260814_add_card_type_to_inventory_dashboard.sql.
 CREATE OR REPLACE VIEW public.v_inventory_dashboard AS
  SELECT DISTINCT ON (c.id) c.id,
     c.name,
@@ -288,7 +295,8 @@ CREATE OR REPLACE VIEW public.v_inventory_dashboard AS
             ELSE NULL::numeric
         END AS unrealized_pnl,
     COALESCE(el.active_listing_count, (0)::bigint) AS active_listing_count,
-    el.lowest_listed_price
+    el.lowest_listed_price,
+    c.card_type
    FROM ((cards c
      LEFT JOIN v_latest_prices lp ON ((lp.card_id = c.id)))
      LEFT JOIN ( SELECT ebay_listings.card_id,
@@ -299,32 +307,51 @@ CREATE OR REPLACE VIEW public.v_inventory_dashboard AS
           GROUP BY ebay_listings.card_id) el ON ((el.card_id = c.id)))
   ORDER BY c.id, c.name;
 
+-- 2026-08-14: rewritten to (a) fall back to the manually-entered cards.cost_basis
+-- for cards not linked to a tracked box (previously always NULL for those), and
+-- (b) average cost basis across boxes with a CTE instead of an inline join that
+-- cross-multiplied pack_cards x price_snapshots before DISTINCT ON collapsed it.
+-- See supabase/migrations/20260814_fix_cost_basis.sql.
 CREATE OR REPLACE VIEW public.v_latest_prices AS
- SELECT DISTINCT ON (c.id) c.id AS card_id,
+ WITH latest_snapshot AS (
+         SELECT DISTINCT ON (ps.card_id) ps.card_id,
+            ps.tcgplayer_market,
+            ps.tcgplayer_low,
+            ps.ebay_sold_avg,
+            ps.ebay_sold_low,
+            ps.ebay_sold_high,
+            ps.ebay_sold_count,
+            ps.checked_at
+           FROM price_snapshots ps
+          ORDER BY ps.card_id, ps.checked_at DESC
+        ), box_cost AS (
+         SELECT pc.card_id,
+            round((sum((b.purchase_price / (b.pack_count)::numeric / 15.0) * (pc.quantity)::numeric) / sum(pc.quantity)), 4) AS avg_cost_basis
+           FROM ((pack_cards pc
+             JOIN packs pk ON ((pk.id = pc.pack_id)))
+             JOIN boxes b ON ((b.id = pk.box_id)))
+          WHERE ((b.purchase_price IS NOT NULL) AND (b.pack_count > 0))
+          GROUP BY pc.card_id
+        )
+ SELECT c.id AS card_id,
     c.name,
     c.set_name,
     c.rarity,
     c.foil,
     c.game_id,
     c.tcgplayer_id,
-    ps.tcgplayer_market,
-    ps.tcgplayer_low,
-    ps.ebay_sold_avg,
-    ps.ebay_sold_low,
-    ps.ebay_sold_high,
-    ps.ebay_sold_count,
-    ps.checked_at,
-        CASE
-            WHEN ((b.purchase_price IS NOT NULL) AND (b.pack_count > 0)) THEN round(((b.purchase_price / (b.pack_count)::numeric) / 15.0), 4)
-            ELSE NULL::numeric
-        END AS cost_basis,
-    ps.tcgplayer_market AS tcg_market_price
-   FROM ((((cards c
-     LEFT JOIN pack_cards pc ON ((pc.card_id = c.id)))
-     LEFT JOIN packs pk ON ((pk.id = pc.pack_id)))
-     LEFT JOIN boxes b ON ((b.id = pk.box_id)))
-     LEFT JOIN price_snapshots ps ON ((ps.card_id = c.id)))
-  ORDER BY c.id, ps.checked_at DESC;
+    ls.tcgplayer_market,
+    ls.tcgplayer_low,
+    ls.ebay_sold_avg,
+    ls.ebay_sold_low,
+    ls.ebay_sold_high,
+    ls.ebay_sold_count,
+    ls.checked_at,
+    COALESCE(bc.avg_cost_basis, c.cost_basis) AS cost_basis,
+    ls.tcgplayer_market AS tcg_market_price
+   FROM ((cards c
+     LEFT JOIN latest_snapshot ls ON ((ls.card_id = c.id)))
+     LEFT JOIN box_cost bc ON ((bc.card_id = c.id)));
 
 -- Gap is calculated on (listed_price - shipping_cost) vs tcgplayer_market so that
 -- the $5 shipping charge is not counted against the card price comparison.
@@ -382,6 +409,8 @@ CREATE OR REPLACE VIEW public.v_listing_price_alerts AS
   WHERE ((el.status = 'active'::text) AND (lp.tcgplayer_market IS NOT NULL) AND (lp.tcgplayer_market > (0)::numeric) AND (abs(((el.listed_price - COALESCE(el.shipping_cost, 5.00) - lp.tcgplayer_market) / NULLIF(lp.tcgplayer_market, (0)::numeric))) > 0.10))
   ORDER BY (abs((el.listed_price - COALESCE(el.shipping_cost, 5.00) - lp.tcgplayer_market))) DESC;
 
+-- 2026-08-14: sum(lp.tcgplayer_market) previously ignored pack_cards.quantity -- see
+-- supabase/migrations/20260814_fix_pack_quantity_weighting.sql.
 CREATE OR REPLACE VIEW public.v_pack_pnl AS
  SELECT pk.id AS pack_id,
     pk.box_id,
@@ -397,9 +426,9 @@ CREATE OR REPLACE VIEW public.v_pack_pnl AS
             WHEN ((b.purchase_price IS NOT NULL) AND (b.pack_count > 0)) THEN round((b.purchase_price / (b.pack_count)::numeric), 4)
             ELSE NULL::numeric
         END AS pack_cost,
-    count(pc.id) AS cards_pulled,
-    (COALESCE(sum(lp.tcgplayer_market), (0)::numeric) + 1.00) AS market_value,
-    ((COALESCE(sum(lp.tcgplayer_market), (0)::numeric) + 1.00) -
+    COALESCE(sum(pc.quantity), (0)::bigint) AS cards_pulled,
+    (COALESCE(sum((lp.tcgplayer_market * pc.quantity)), (0)::numeric) + 1.00) AS market_value,
+    ((COALESCE(sum((lp.tcgplayer_market * pc.quantity)), (0)::numeric) + 1.00) -
         CASE
             WHEN ((b.purchase_price IS NOT NULL) AND (b.pack_count > 0)) THEN round((b.purchase_price / (b.pack_count)::numeric), 4)
             ELSE (0)::numeric
@@ -547,6 +576,8 @@ CREATE OR REPLACE VIEW public.v_unrealized_gain_alerts AS
   WHERE ((lp.tcgplayer_market IS NOT NULL) AND (lp.cost_basis IS NOT NULL) AND (lp.cost_basis > (0)::numeric) AND (lp.tcgplayer_market > (lp.cost_basis * 1.50)))
   ORDER BY (round((((lp.tcgplayer_market - lp.cost_basis) / lp.cost_basis) * (100)::numeric), 1)) DESC;
 
+-- 2026-08-14: sum(lp.tcgplayer_market) previously ignored pack_cards.quantity -- see
+-- supabase/migrations/20260814_fix_pack_quantity_weighting.sql.
 CREATE OR REPLACE VIEW public.v_youtube_opening_summary AS
  SELECT yo.id,
     yo.title,
@@ -561,14 +592,14 @@ CREATE OR REPLACE VIEW public.v_youtube_opening_summary AS
     b.purchase_price AS box_cost,
     b.game_id,
     count(DISTINCT yop.pack_id) AS packs_in_video,
-    count(pc.id) AS cards_pulled,
-    (COALESCE(sum(lp.tcgplayer_market), (0)::numeric) + ((count(DISTINCT yop.pack_id))::numeric * 1.00)) AS total_tcg_value,
-    (COALESCE(sum(lp.tcgplayer_market), (0)::numeric) + ((count(DISTINCT yop.pack_id))::numeric * 1.00)) AS market_value,
+    COALESCE(sum(pc.quantity), (0)::bigint) AS cards_pulled,
+    (COALESCE(sum((lp.tcgplayer_market * pc.quantity)), (0)::numeric) + ((count(DISTINCT yop.pack_id))::numeric * 1.00)) AS total_tcg_value,
+    (COALESCE(sum((lp.tcgplayer_market * pc.quantity)), (0)::numeric) + ((count(DISTINCT yop.pack_id))::numeric * 1.00)) AS market_value,
     COALESCE(((count(DISTINCT yop.pack_id))::numeric * COALESCE(b.pack_msrp, (5)::numeric)), (0)::numeric) AS packs_cost,
-    ((COALESCE(sum(lp.tcgplayer_market), (0)::numeric) + ((count(DISTINCT yop.pack_id))::numeric * 1.00)) - COALESCE(((count(DISTINCT yop.pack_id))::numeric * COALESCE(b.pack_msrp, (5)::numeric)), (0)::numeric)) AS opening_pnl,
+    ((COALESCE(sum((lp.tcgplayer_market * pc.quantity)), (0)::numeric) + ((count(DISTINCT yop.pack_id))::numeric * 1.00)) - COALESCE(((count(DISTINCT yop.pack_id))::numeric * COALESCE(b.pack_msrp, (5)::numeric)), (0)::numeric)) AS opening_pnl,
     max(lp.tcgplayer_market) AS best_card_value,
         CASE
-            WHEN (((count(DISTINCT yop.pack_id))::numeric * COALESCE(b.pack_msrp, (5)::numeric)) > (0)::numeric) THEN round(((((COALESCE(sum(lp.tcgplayer_market), (0)::numeric) + ((count(DISTINCT yop.pack_id))::numeric * 1.00)) - ((count(DISTINCT yop.pack_id))::numeric * COALESCE(b.pack_msrp, (5)::numeric))) / ((count(DISTINCT yop.pack_id))::numeric * COALESCE(b.pack_msrp, (5)::numeric))) * (100)::numeric), 1)
+            WHEN (((count(DISTINCT yop.pack_id))::numeric * COALESCE(b.pack_msrp, (5)::numeric)) > (0)::numeric) THEN round(((((COALESCE(sum((lp.tcgplayer_market * pc.quantity)), (0)::numeric) + ((count(DISTINCT yop.pack_id))::numeric * 1.00)) - ((count(DISTINCT yop.pack_id))::numeric * COALESCE(b.pack_msrp, (5)::numeric))) / ((count(DISTINCT yop.pack_id))::numeric * COALESCE(b.pack_msrp, (5)::numeric))) * (100)::numeric), 1)
             ELSE NULL::numeric
         END AS roi_pct
    FROM (((((youtube_openings yo

@@ -13,8 +13,10 @@ const fmtPnl  = n  => { if (n == null) return '—'; const v = Number(n); return
 const fmtDate = d  => d  ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'
 const roiCol  = v  => v  == null ? 'var(--text-muted)' : Number(v) >= 0 ? 'var(--success)' : 'var(--danger)'
 
-const PACK_MSRP     = 5.00
+const PACK_MSRP     = 5.00 // fallback when a box has no pack_msrp set
 const DEFAULT_PACKS = 36
+
+const packMsrpOf = box => Number(box?.pack_msrp) || PACK_MSRP
 
 function BoxSelector({ opened, selectedIds, onToggle, onSelectAll, onSelectNone }) {
   const [open,  setOpen]  = useState(false)
@@ -145,10 +147,19 @@ export default function BoxEV() {
 
   useEffect(() => {
     async function load() {
-      const [{ data: boxData }, { data: pcData }] = await Promise.all([
-        supabase.from('v_box_pnl').select('*').eq('game_id', activeGame.id).order('opened_at', { ascending: true, nullsFirst: false }),
-        supabase.from('pack_cards').select('quantity, pack_id, cards(id, name, rarity, foil), packs(pack_number, box_id)'),
-      ])
+      setLoading(true)
+      const { data: boxData } = await supabase
+        .from('v_box_pnl').select('*').eq('game_id', activeGame.id).order('opened_at', { ascending: true, nullsFirst: false })
+      const allBoxes = boxData ?? []
+      const boxIds   = allBoxes.map(b => b.id)
+
+      // Scoped to this game's boxes via an inner join through packs, so switching games
+      // doesn't pull (and price-lookup) every other game's pull records too.
+      const { data: pcData } = boxIds.length
+        ? await supabase.from('pack_cards')
+            .select('quantity, pack_id, cards(id, name, rarity, foil), packs!inner(pack_number, box_id)')
+            .in('packs.box_id', boxIds)
+        : { data: [] }
 
       const cardIds = [...new Set((pcData ?? []).map(pc => pc.cards?.id).filter(Boolean))]
       let priceMap = {}
@@ -158,7 +169,6 @@ export default function BoxEV() {
         priceMap = Object.fromEntries((pd ?? []).map(p => [p.card_id, Number(p.tcgplayer_market) || 0]))
       }
 
-      const allBoxes  = boxData ?? []
       const boxLookup = Object.fromEntries(allBoxes.map(b => [b.id, b]))
       const enriched  = (pcData ?? []).map(pc => ({
         cardId:   pc.cards?.id,
@@ -183,7 +193,7 @@ export default function BoxEV() {
       setLoading(false)
     }
     load()
-  }, [])
+  }, [activeGame.id])
 
   // ── All opened boxes ───────────────────────────────────────────────────────
   const opened = useMemo(() => boxes.filter(b => b.opened_at), [boxes])
@@ -215,6 +225,21 @@ export default function BoxEV() {
   const totalPacks    = uniquePackIds.size
   const evPerPack     = totalPacks > 0 ? totalValue / totalPacks : null
 
+  // Blended break-even for the current selection: each tracked pack's own box's
+  // pack_msrp (falling back to $5), averaged — so a mix of boxes with different
+  // actual pack prices compares evPerPack against the right bar, not a flat $5.
+  const boxById = useMemo(() => Object.fromEntries(filtBoxes.map(b => [b.id, b])), [filtBoxes])
+  const blendedMsrp = useMemo(() => {
+    const packBoxMap = {}
+    for (const p of filtPulls) {
+      if (p.packId && !(p.packId in packBoxMap)) packBoxMap[p.packId] = p.boxId
+    }
+    const ids = Object.keys(packBoxMap)
+    if (!ids.length) return PACK_MSRP
+    const total = ids.reduce((s, packId) => s + packMsrpOf(boxById[packBoxMap[packId]]), 0)
+    return total / ids.length
+  }, [filtPulls, boxById])
+
   // Best single pack within selection
   const packValMap = useMemo(() => {
     const m = {}
@@ -243,8 +268,10 @@ export default function BoxEV() {
   const gothicBoxIds = new Set(gothicBoxes.map(b => b.id))
   const gothicPacks  = new Set(filtPulls.filter(p => gothicBoxIds.has(p.boxId)).map(p => p.packId).filter(Boolean))
   const gothicEV     = gothicPacks.size > 0 ? gothicValue / gothicPacks.size : null
-  const gothicWorth  = gothicEV != null && gothicEV >= PACK_MSRP
+  const gothicMsrp   = gothicBoxes.length > 0 ? gothicBoxes.reduce((s, b) => s + packMsrpOf(b), 0) / gothicBoxes.length : PACK_MSRP
+  const gothicWorth  = gothicEV != null && gothicEV >= gothicMsrp
   const gothicAvgBox = gothicBoxes.length > 0 ? gothicCost / gothicBoxes.length : null
+  const gothicAvgPacks = gothicBoxes.length > 0 ? gothicBoxes.reduce((s, b) => s + Number(b.pack_count || DEFAULT_PACKS), 0) / gothicBoxes.length : DEFAULT_PACKS
 
   // Pull rates by rarity (within selection)
   const { rarityStats, totalTracked } = useMemo(() => {
@@ -271,6 +298,18 @@ export default function BoxEV() {
       .slice(0, 10)
   ), [filtPulls])
 
+  // Packs actually tracked (recorded pulls) per box, across ALL opened boxes —
+  // not just the current selection, since boxRows lists every opened box.
+  const trackedPacksByBox = useMemo(() => {
+    const m = {}
+    for (const p of pulls) {
+      if (!p.boxId || !p.packId) continue
+      if (!m[p.boxId]) m[p.boxId] = new Set()
+      m[p.boxId].add(p.packId)
+    }
+    return m
+  }, [pulls])
+
   // Box-by-box ROI table (all opened, so user can see and click)
   const boxRows = useMemo(() => (
     [...opened]
@@ -280,11 +319,14 @@ export default function BoxEV() {
         const val   = Number(box.cards_market_value || 0)
         const pnl   = val - cost
         const roi   = cost > 0 ? (pnl / cost * 100) : null
-        const packs = Number(box.pack_count || DEFAULT_PACKS)
+        // EV/pack uses packs actually tracked, matching the hero "EV per Pack" metric --
+        // dividing by the box's full advertised pack_count would understate EV for any
+        // box that hasn't had every pack logged yet.
+        const packs = trackedPacksByBox[box.id]?.size ?? 0
         const ev    = packs > 0 ? val / packs : null
-        return { ...box, _pnl: pnl, _roi: roi, _ev: ev }
+        return { ...box, _pnl: pnl, _roi: roi, _ev: ev, _msrp: packMsrpOf(box) }
       })
-  ), [opened])
+  ), [opened, trackedPacksByBox])
 
   // ROI over time (cumulative, filtered selection, sorted by opened_at)
   const roiChart = useMemo(() => {
@@ -349,8 +391,8 @@ export default function BoxEV() {
             <div className="metric-card">
               <div className="metric-label">EV per Pack</div>
               <div className="metric-value gold">{usd(evPerPack)}</div>
-              <div className="metric-sub" style={{ color: evPerPack != null && evPerPack >= PACK_MSRP ? 'var(--success)' : 'var(--danger)' }}>
-                {evPerPack != null ? (evPerPack >= PACK_MSRP ? `↑ beats $${PACK_MSRP.toFixed(2)} MSRP` : `↓ below $${PACK_MSRP.toFixed(2)} MSRP`) : `vs $${PACK_MSRP.toFixed(2)} MSRP`}
+              <div className="metric-sub" style={{ color: evPerPack != null && evPerPack >= blendedMsrp ? 'var(--success)' : 'var(--danger)' }}>
+                {evPerPack != null ? (evPerPack >= blendedMsrp ? `↑ beats $${blendedMsrp.toFixed(2)} MSRP` : `↓ below $${blendedMsrp.toFixed(2)} MSRP`) : `vs $${blendedMsrp.toFixed(2)} MSRP`}
               </div>
             </div>
             <div className="metric-card">
@@ -391,7 +433,7 @@ export default function BoxEV() {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 14 }}>
                   <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
                   <div style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-                    Break-even: {usd(PACK_MSRP)}/pack · {usd(gothicAvgBox != null ? gothicAvgBox / DEFAULT_PACKS : null)}/pack at avg box cost
+                    Break-even: {usd(gothicMsrp)}/pack · {usd(gothicAvgBox != null ? gothicAvgBox / gothicAvgPacks : null)}/pack at avg box cost
                   </div>
                   <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
                 </div>
@@ -402,8 +444,8 @@ export default function BoxEV() {
                   fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.65,
                 }}>
                   {gothicWorth
-                    ? `Based on ${gothicPacks.size} tracked packs across ${gothicBoxes.length} ${primarySet} booster ${gothicBoxes.length === 1 ? 'box' : 'boxes'}, your average pack EV of ${usd(gothicEV)} beats the $${PACK_MSRP.toFixed(2)} MSRP. ${primarySet} boxes have been profitable on average — total P&L: ${fmtPnl(gothicPnl)}.`
-                    : `Based on ${gothicPacks.size} tracked packs across ${gothicBoxes.length} ${primarySet} booster ${gothicBoxes.length === 1 ? 'box' : 'boxes'}, your average pack EV of ${usd(gothicEV)} is below the $${PACK_MSRP.toFixed(2)} MSRP. If you bought at or below MSRP you may still be in profit — check individual box ROI below.`
+                    ? `Based on ${gothicPacks.size} tracked packs across ${gothicBoxes.length} ${primarySet} booster ${gothicBoxes.length === 1 ? 'box' : 'boxes'}, your average pack EV of ${usd(gothicEV)} beats the $${gothicMsrp.toFixed(2)} MSRP. ${primarySet} boxes have been profitable on average — total P&L: ${fmtPnl(gothicPnl)}.`
+                    : `Based on ${gothicPacks.size} tracked packs across ${gothicBoxes.length} ${primarySet} booster ${gothicBoxes.length === 1 ? 'box' : 'boxes'}, your average pack EV of ${usd(gothicEV)} is below the $${gothicMsrp.toFixed(2)} MSRP. If you bought at or below MSRP you may still be in profit — check individual box ROI below.`
                   }
                 </div>
               </div>
@@ -529,7 +571,7 @@ export default function BoxEV() {
                           <td className="text-right" style={{ fontSize: 12 }}>{usd(box.purchase_price)}</td>
                           <td className="text-right text-gold" style={{ fontSize: 12 }}>{usd(box.cards_market_value)}</td>
                           <td className="text-right" style={{ fontSize: 12 }}>
-                            <span style={{ color: box._ev != null && box._ev >= PACK_MSRP ? 'var(--success)' : 'var(--danger)' }}>
+                            <span style={{ color: box._ev != null && box._ev >= box._msrp ? 'var(--success)' : 'var(--danger)' }}>
                               {usd(box._ev)}
                             </span>
                           </td>
@@ -551,7 +593,7 @@ export default function BoxEV() {
                       </td>
                       <td className="text-right text-gold" style={{ padding: '8px 14px', fontWeight: 500, borderTop: '1px solid var(--border)', fontSize: 12 }}>{usd(totalValue)}</td>
                       <td className="text-right" style={{ padding: '8px 14px', borderTop: '1px solid var(--border)', fontSize: 12 }}>
-                        <span style={{ color: evPerPack != null && evPerPack >= PACK_MSRP ? 'var(--success)' : 'var(--danger)' }}>
+                        <span style={{ color: evPerPack != null && evPerPack >= blendedMsrp ? 'var(--success)' : 'var(--danger)' }}>
                           {usd(evPerPack)}
                         </span>
                       </td>
