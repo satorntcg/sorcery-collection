@@ -187,8 +187,10 @@ export default function BoxEV() {
 
       setBoxes(allBoxes)
       setPulls(enriched)
-      // default: all opened boxes selected
-      const openedIds = allBoxes.filter(b => b.opened_at).map(b => b.id)
+      // default: opened boxes that actually have tracked packs -- a box marked
+      // opened with nothing logged yet has no EV data and would just show as a
+      // -100% ROI outlier dragging down the aggregate stats if pre-selected.
+      const openedIds = allBoxes.filter(b => b.opened_at && Number(b.packs_opened) > 0).map(b => b.id)
       setSelectedIds(new Set(openedIds))
       setLoading(false)
     }

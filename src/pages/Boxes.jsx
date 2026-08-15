@@ -223,6 +223,12 @@ export default function Boxes() {
     setPullSaving(true)
 
     try {
+      // Logging a pull means the box has been opened -- set opened_at if it isn't
+      // already (guarded so it never clobbers an explicitly-set date). Previously
+      // this only happened via a separate "Mark opened" button, which a box could
+      // never show again once packs_opened > 0 -- see the Box row render below.
+      await supabase.from('boxes').update({ opened_at: new Date().toISOString() }).eq('id', selected).is('opened_at', null)
+
       // 1. Resolve pack ID once for all cards
       let packId = pullForm.packId === 'new' ? null : pullForm.packId
       if (pullForm.packId === 'new') {
@@ -444,7 +450,7 @@ export default function Boxes() {
                       </td>
                       <td>
                         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 3 }}>
-                          {!box.opened_at && !box.packs_opened ? (
+                          {!box.opened_at ? (
                             <button
                               className="btn btn-ghost btn-sm"
                               style={{ whiteSpace: 'nowrap', fontSize: 11 }}
