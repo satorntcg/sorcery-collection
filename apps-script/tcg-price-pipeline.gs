@@ -144,10 +144,17 @@ function dailyPriceUpdate() {
 // F Low Price
 // G High Price
 // H Game
+// I Foil
 //
 // (This step never touches Supabase, so it needs no game_id
 // awareness — the "Game" column here is just the TCG_GAMES key,
 // consumed by pushPricesToSupabase() below purely for logging.)
+//
+// Some games (Riftbound, like Pokémon) sell Normal + Foil printings
+// of the SAME card under one shared TCGplayer productId, distinguished
+// only by pricing subTypeName — not as separate catalog products the
+// way Sorcery's foil cards are (their own productId, "(Foil)" in the
+// name). So one product can produce ONE OR TWO rows here.
 //
 // ============================================================
 
@@ -170,7 +177,7 @@ function pullAllTCGCards() {
   sheet.clearContents();
 
   sheet
-    .getRange(1, 1, 1, 8)
+    .getRange(1, 1, 1, 9)
     .setValues([[
       "Card Name",
       "TCGplayer Product ID",
@@ -179,7 +186,8 @@ function pullAllTCGCards() {
       "Set",
       "Low Price",
       "High Price",
-      "Game"
+      "Game",
+      "Foil"
     ]]);
 
 
@@ -301,12 +309,8 @@ function pullAllTCGCards() {
         // --------------------------------------------------
         // Build price lookup
         //
-        // productId →
-        // {
-        //   marketPrice,
-        //   lowPrice,
-        //   highPrice
-        // }
+        // productId → array of printings (one per subTypeName —
+        // "Normal", "Foil", ...). Most products only ever have one.
         //
         // --------------------------------------------------
 
@@ -320,28 +324,33 @@ function pullAllTCGCards() {
           }
 
 
-          priceMap.set(
-            price.productId,
-            {
-
-              marketPrice:
-                price.marketPrice !== null &&
-                price.marketPrice !== ""
-
-                  ? price.marketPrice
-
-                  : (price.midPrice ?? ""),
+          if (!priceMap.has(price.productId)) {
+            priceMap.set(price.productId, []);
+          }
 
 
-              lowPrice:
-                price.lowPrice ?? "",
+          priceMap.get(price.productId).push({
+
+            subTypeName:
+              price.subTypeName || "",
+
+            marketPrice:
+              price.marketPrice !== null &&
+              price.marketPrice !== ""
+
+                ? price.marketPrice
+
+                : (price.midPrice ?? ""),
 
 
-              highPrice:
-                price.highPrice ?? ""
+            lowPrice:
+              price.lowPrice ?? "",
 
-            }
-          );
+
+            highPrice:
+              price.highPrice ?? ""
+
+          });
 
         });
 
@@ -351,7 +360,7 @@ function pullAllTCGCards() {
 
 
         // --------------------------------------------------
-        // Products → Sheet rows
+        // Products → Sheet rows (one row per printing)
         // --------------------------------------------------
 
         products.forEach(product => {
@@ -373,12 +382,6 @@ function pullAllTCGCards() {
           }
 
 
-          const price =
-            priceMap.get(
-              product.productId
-            ) || {};
-
-
           const tcgRarity =
             getRarity_(product);
 
@@ -390,25 +393,46 @@ function pullAllTCGCards() {
             );
 
 
-          allRows.push([
+          // No pricing data yet for this product → still emit one row
+          // (blank price), foil decided from the name alone.
+          const printings =
+            priceMap.get(product.productId) || [{
+              subTypeName: "", marketPrice: "", lowPrice: "", highPrice: ""
+            }];
 
-            name,
 
-            product.productId || "",
+          printings.forEach(printing => {
 
-            price.marketPrice ?? "",
+            const isFoil =
+              isFoilPrinting_(
+                printing.subTypeName,
+                name
+              );
 
-            rarity,
 
-            setName,
+            allRows.push([
 
-            price.lowPrice ?? "",
+              name,
 
-            price.highPrice ?? "",
+              product.productId || "",
 
-            gameName
+              printing.marketPrice ?? "",
 
-          ]);
+              rarity,
+
+              setName,
+
+              printing.lowPrice ?? "",
+
+              printing.highPrice ?? "",
+
+              gameName,
+
+              isFoil
+
+            ]);
+
+          });
 
 
           added++;
@@ -438,7 +462,7 @@ function pullAllTCGCards() {
         2,
         1,
         allRows.length,
-        8
+        9
       )
       .setValues(allRows);
 
@@ -509,7 +533,7 @@ function pushPricesToSupabase() {
 
 
   // ========================================================
-  // Read 8 columns
+  // Read 9 columns
   //
   // name
   // productId
@@ -519,6 +543,7 @@ function pushPricesToSupabase() {
   // lowPrice
   // highPrice
   // game
+  // foil
   // ========================================================
 
   const data =
@@ -527,7 +552,7 @@ function pushPricesToSupabase() {
         2,
         1,
         lastRow - 1,
-        8
+        9
       )
       .getValues();
 
@@ -553,7 +578,7 @@ function pushPricesToSupabase() {
       UrlFetchApp.fetch(
 
         `${SUPABASE_URL}/rest/v1/cards` +
-        `?select=id,name,tcgplayer_id` +
+        `?select=id,name,tcgplayer_id,foil` +
         `&tcgplayer_id=not.is.null` +
         `&limit=${pageSize}` +
         `&offset=${from}`,
@@ -615,10 +640,13 @@ function pushPricesToSupabase() {
 
       if (card.tcgplayer_id) {
 
+        // Keyed by productId+foil, not just productId — Riftbound-style
+        // games can have two cards (Normal/Foil) sharing one productId.
         productIdMap.set(
-          String(
-            card.tcgplayer_id
-          ).trim(),
+          printingKey_(
+            card.tcgplayer_id,
+            card.foil
+          ),
 
           card.id
         );
@@ -772,7 +800,8 @@ function pushPricesToSupabase() {
       setName,
       lowPrice,
       highPrice,
-      gameName
+      gameName,
+      foil
     ] = row;
 
 
@@ -793,7 +822,7 @@ function pushPricesToSupabase() {
 
     const cardId =
       productIdMap.get(
-        String(productId).trim()
+        printingKey_(productId, foil)
       );
 
 
@@ -879,7 +908,10 @@ function pushPricesToSupabase() {
             String(productId),
 
           name:
-            String(name)
+            String(name),
+
+          foil:
+            Boolean(foil)
 
         }
 
@@ -1122,7 +1154,13 @@ function pushPricesToSupabase() {
       const [
         name,
         productId,
-        marketPrice
+        marketPrice,
+        rarity,
+        setName,
+        lowPrice,
+        highPrice,
+        gameName,
+        foil
       ] = row;
 
 
@@ -1143,7 +1181,7 @@ function pushPricesToSupabase() {
 
       const cardId =
         productIdMap.get(
-          String(productId).trim()
+          printingKey_(productId, foil)
         );
 
 
@@ -1956,7 +1994,7 @@ function seedCardsFromTcgPlayer() {
       UrlFetchApp.fetch(
 
         `${SUPABASE_URL}/rest/v1/cards` +
-        `?select=name,game_id,tcgplayer_id` +
+        `?select=name,game_id,tcgplayer_id,foil` +
         `&limit=${pageSize}` +
         `&offset=${from}`,
 
@@ -2021,9 +2059,13 @@ function seedCardsFromTcgPlayer() {
 
   // ========================================================
   // Duplicate protection
+  //
+  // Keyed by productId+foil (a "printing"), not just productId —
+  // Riftbound-style games sell Normal + Foil under the SAME
+  // productId, so two DIFFERENT cards rows can share one tcgplayer_id.
   // ========================================================
 
-  const existingTcgIds =
+  const existingPrintings =
     new Set();
 
 
@@ -2035,10 +2077,11 @@ function seedCardsFromTcgPlayer() {
 
     if (card.tcgplayer_id) {
 
-      existingTcgIds.add(
-        String(
-          card.tcgplayer_id
-        ).trim()
+      existingPrintings.add(
+        printingKey_(
+          card.tcgplayer_id,
+          card.foil
+        )
       );
 
     }
@@ -2049,7 +2092,8 @@ function seedCardsFromTcgPlayer() {
       existingGameNames.add(
 
         `${card.game_id}` +
-        `|${card.name.toLowerCase().trim()}`
+        `|${card.name.toLowerCase().trim()}` +
+        `|${Boolean(card.foil)}`
 
       );
 
@@ -2156,6 +2200,39 @@ function seedCardsFromTcgPlayer() {
           ).results || [];
 
 
+        // productId → array of subTypeName strings seen in pricing data
+        // ("Normal", "Foil", ...). Whether each one counts as foil is
+        // decided below, once the product's own name is in scope too —
+        // Sorcery's foil cards are separate productIds whose *name* says
+        // "(Foil)", not their subTypeName, so subTypeName alone isn't
+        // enough to classify a printing correctly for every game.
+        const subTypesByProduct =
+          new Map();
+
+
+        (
+          fetchJson_(
+            `${TCGCSV_BASE}/${categoryId}/${groupId}/prices`
+          )
+        ).results?.forEach(price => {
+
+          if (!price.productId) {
+            return;
+          }
+
+
+          if (!subTypesByProduct.has(price.productId)) {
+            subTypesByProduct.set(price.productId, []);
+          }
+
+
+          subTypesByProduct
+            .get(price.productId)
+            .push(price.subTypeName || "");
+
+        });
+
+
         const toInsert = [];
 
 
@@ -2195,42 +2272,6 @@ function seedCardsFromTcgPlayer() {
 
 
           // ------------------------------------------------
-          // TCGplayer ID duplicate
-          // ------------------------------------------------
-
-          if (
-            existingTcgIds.has(productId)
-          ) {
-
-            totalDupe++;
-
-            return;
-
-          }
-
-
-          // ------------------------------------------------
-          // Game + name duplicate
-          // ------------------------------------------------
-
-          const gameNameKey =
-
-            `${gameId}` +
-            `|${name.toLowerCase()}`;
-
-
-          if (
-            existingGameNames.has(gameNameKey)
-          ) {
-
-            totalDupe++;
-
-            return;
-
-          }
-
-
-          // ------------------------------------------------
           // Rarity — skip rather than insert a NOT NULL
           // violation. cards.rarity has no default, so a
           // product with no rarity data cannot be inserted.
@@ -2262,51 +2303,109 @@ function seedCardsFromTcgPlayer() {
 
 
           // ------------------------------------------------
-          // Insert object
+          // Printings — usually just one, decided from the name
+          // (Sorcery-style). If pricing data shows more than one
+          // subTypeName for this productId (Riftbound-style Normal
+          // + Foil sharing a productId), that becomes two printings.
           // ------------------------------------------------
 
-          toInsert.push({
+          const subTypes =
+            subTypesByProduct.get(product.productId) || [""];
 
-            game_id:
-              gameId,
 
-            name:
-              name,
+          const printings =
+            new Set(
+              subTypes.map(subType =>
+                isFoilPrinting_(subType, name)
+              )
+            );
 
-            set_name:
-              setName,
 
-            set_code:
-              mapSetCode_(
-                gameName,
-                setName
-              ),
+          printings.forEach(isFoil => {
 
-            rarity:
-              rarity,
+            // ----------------------------------------------
+            // Per-printing duplicate check
+            // ----------------------------------------------
 
-            foil:
-              /\(foil\)/i.test(name),
+            if (
+              existingPrintings.has(
+                printingKey_(productId, isFoil)
+              )
+            ) {
 
-            tcgplayer_id:
-              productId,
+              totalDupe++;
 
-            image_url:
-              product.imageUrl || null
+              return;
+
+            }
+
+
+            const gameNameKey =
+
+              `${gameId}` +
+              `|${name.toLowerCase()}` +
+              `|${isFoil}`;
+
+
+            if (
+              existingGameNames.has(gameNameKey)
+            ) {
+
+              totalDupe++;
+
+              return;
+
+            }
+
+
+            // ------------------------------------------------
+            // Insert object
+            // ------------------------------------------------
+
+            toInsert.push({
+
+              game_id:
+                gameId,
+
+              name:
+                name,
+
+              set_name:
+                setName,
+
+              set_code:
+                mapSetCode_(
+                  gameName,
+                  setName
+                ),
+
+              rarity:
+                rarity,
+
+              foil:
+                isFoil,
+
+              tcgplayer_id:
+                productId,
+
+              image_url:
+                product.imageUrl || null
+
+            });
+
+
+            // Prevent duplicates during same run
+
+            existingPrintings.add(
+              printingKey_(productId, isFoil)
+            );
+
+
+            existingGameNames.add(
+              gameNameKey
+            );
 
           });
-
-
-          // Prevent duplicates during same run
-
-          existingTcgIds.add(
-            productId
-          );
-
-
-          existingGameNames.add(
-            gameNameKey
-          );
 
         });
 
@@ -2875,6 +2974,49 @@ function mapSetCode_(
 
 
   return null;
+
+}
+
+
+// ============================================================
+// HELPER
+//
+// Is this printing (a price row's subTypeName, plus the product's
+// own name as a fallback) the foil version of a card?
+//
+// Sorcery encodes foil in the product NAME ("(Foil)") since foil
+// cards are entirely separate TCGplayer productIds. Riftbound (like
+// Pokémon) encodes it in the pricing subTypeName ("Foil") instead,
+// since Normal + Foil share one productId. Checking both covers
+// either convention without needing to know which game called it.
+// ============================================================
+
+function isFoilPrinting_(subTypeName, name) {
+
+  return (
+    /foil/i.test(subTypeName || "") ||
+    /\(foil\)/i.test(name || "")
+  );
+
+}
+
+
+// ============================================================
+// HELPER
+//
+// Key identifying one specific printing of a card: its TCGplayer
+// productId PLUS whether it's foil. Needed because Riftbound-style
+// games can have two different `cards` rows (Normal/Foil) sharing
+// the exact same productId — bare productId isn't unique enough to
+// match a sheet row (or a price snapshot) back to the right card.
+// ============================================================
+
+function printingKey_(productId, foil) {
+
+  return (
+    `${String(productId).trim()}` +
+    `|${foil ? "foil" : "normal"}`
+  );
 
 }
 
