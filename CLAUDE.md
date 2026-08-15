@@ -30,6 +30,7 @@ Pure client-side SPA: Vite + React 18 + react-router-dom v6, talking directly to
 | `/alerts` | `Alerts.jsx` | Price alert review + dismiss |
 | `/listings` | `Ebaylistings.jsx` | eBay listing CRUD (2-step modal) |
 | `/tcgplayer` | `Tcgplayerlistings.jsx` | TCGPlayer listing CRUD (2-step modal, 10.25% fee) |
+| `/sales` | `Sales.jsx` | Combined eBay + TCGPlayer sold-cards feed, weekly/monthly breakdown |
 | `/suggestions` | `Listingsuggestions.jsx` | AI-powered lot grouping + eBay creation |
 | `/boxes` | `Boxes.jsx` | Sealed product P&L |
 | `/market` | `Market.jsx` | Manual price-check trigger |
@@ -74,6 +75,7 @@ Views the UI reads from (heavier joins/aggregations live in Postgres, not the cl
 - `v_youtube_opening_summary` — openings joined with pack/card aggregates: `total_tcg_value`, `opening_pnl`, `packs_cost`, `packs_in_video`, `pack_msrp`, `pack_count`, `box_name`, `set_name`
 - `v_price_gainers_losers` — 7-day price movers per card: `card_id, name, rarity, foil, current_price, price_7d_ago, pct_change`
 - `v_tcgplayer_active` / `v_tcgplayer_sold` — active/sold TCGPlayer listings joined with card + lot info (mirrors `v_ebay_active`/`v_ebay_sold`)
+- `v_ebay_active`/`v_ebay_sold`/`v_tcgplayer_active`/`v_tcgplayer_sold` all expose `total_quantity` — the actual physical card count a listing represents (`quantity` bundle-multiplier × the sum of each card's junction-row `quantity`). Use this for "how many cards" math; the raw `quantity` column is just the bundle multiplier (always selected as-is on the TCGPlayer views, never selected at all on the eBay ones before this), and `card_count` is a `COUNT(DISTINCT card_id)` meant only for "does this lot have more than one distinct card" — both undercount whenever a card's own lot quantity is > 1. `all_card_names` appends ` ×N` per card when its lot quantity is > 1 (active and sold views alike). Added 2026-08-15 after `Sales.jsx` surfaced "cards sold" totals that didn't match the underlying listings; see `supabase/migrations/20260815_fix_listing_total_quantity.sql` and `20260815_add_quantity_suffix_to_sold_lot_names.sql`.
 - `v_tcgplayer_pnl` — aggregate TCGPlayer revenue/fees/profit (mirrors `v_global_pnl`)
 - `v_combined_pnl` — `v_global_pnl` (eBay) + `v_tcgplayer_pnl` (TCGPlayer) summed into one row. Used only by `Dashboard.jsx` for the "Business net profit" panel, since that figure nets revenue against *all* box spend — computing it per-channel double-counted box costs (a card sold on one channel still looked like unsold stock in the other channel's math). The `Ebaylistings.jsx`/`Tcgplayerlistings.jsx` Business P&L tabs show channel-scoped revenue/fees/COGS only and link to the Dashboard for the combined number
 
@@ -115,6 +117,10 @@ Fee constants in this file (`EBAY_FEE_PCT = 0.129`, `EBAY_FEE_FLAT = 0.30`, `DEF
 ### TCGPlayer Listings (Tcgplayerlistings.jsx)
 
 A second listing channel, structurally identical to `Ebaylistings.jsx` (2-step create modal, edit/sold/end/link/delete-sold modals, `shipping_cost`/`sold_shipping` fields) but backed by its own tables (`tcgplayer_listings`, `tcgplayer_listing_cards`) and views (`v_tcgplayer_active`, `v_tcgplayer_sold`, `v_tcgplayer_pnl`) rather than the eBay ones. Differences from the eBay page: shipping defaults to `$5.00` (`TCG_SHIP_DEFAULT`) rather than eBay's `$0`/`$4` defaults, a flat `TCG_FEE_PCT = 0.1025` commission instead of eBay's fee formula, and a `tcgplayer_url` field instead of `ebay_url`. Marking a listing sold decrements the same `cards.quantity_owned`/`quantity_listed` columns eBay sales do, so inventory reflects both channels together — `quantity_listed` is not channel-specific.
+
+### Sales (Sales.jsx)
+
+Combines `v_ebay_sold` and `v_tcgplayer_sold` (game-scoped) into one feed: summary metrics (cards sold, revenue, net profit, avg sale price), a Weekly/Monthly breakdown chart (Cards Sold/Revenue/Net Profit toggle, `recharts`) grouped client-side by `sold_at`, and a merged sold-cards table with a channel filter. `net_profit` is read straight from the views — it's already cost-basis-net (computed as `net proceeds - cost_basis` in Ebaylistings.jsx/Tcgplayerlistings.jsx's Sold modals and frozen onto the row at sale time), so this page doesn't re-subtract cost basis itself. "Cards sold" and the chart's Cards Sold/Revenue series use `total_quantity`, not `quantity` or `card_count` (see the views note above). Channel bar colors (`EBAY_COLOR`/`TCG_COLOR` constants in this file) are a dark-surface-validated pair, not the raw `--gold`/eBay-badge-blue values used elsewhere in the UI.
 
 ### YouTube page (YouTube.jsx)
 

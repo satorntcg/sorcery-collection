@@ -9,6 +9,7 @@ import Inventory from './pages/Inventory'
 import Alerts from './pages/Alerts'
 import EbayListings from './pages/Ebaylistings'
 import TcgplayerListings from './pages/Tcgplayerlistings'
+import Sales from './pages/Sales'
 import Boxes from './pages/Boxes'
 import Market from './pages/Market'
 import Settings from './pages/Settings'
@@ -110,6 +111,7 @@ export default function App() {
           <Route path="/alerts"      element={<Alerts onDismiss={() => setAlertCount(c => Math.max(0, c - 1))} />} />
           <Route path="/listings"    element={<EbayListings />} />
           <Route path="/tcgplayer"   element={<TcgplayerListings />} />
+          <Route path="/sales"       element={<Sales />} />
           <Route path="/boxes"       element={<Boxes />} />
           <Route path="/market"      element={<Market />} />
           <Route path="/youtube"     element={<YouTube />} />

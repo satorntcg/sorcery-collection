@@ -1073,7 +1073,7 @@ export default function TcgplayerListings() {
                   <thead><tr>
                     <th onClick={() => toggleSort('title')} style={{ cursor: 'pointer' }}>Card <SortIcon col="title" /></th>
                     <th>Cards in lot</th>
-                    <th onClick={() => toggleSort('quantity')} style={{ cursor: 'pointer', textAlign: 'right' }}>Qty <SortIcon col="quantity" /></th>
+                    <th onClick={() => toggleSort('total_quantity')} style={{ cursor: 'pointer', textAlign: 'right' }}>Qty <SortIcon col="total_quantity" /></th>
                     <th onClick={() => toggleSort('listed_price')} style={{ cursor: 'pointer', textAlign: 'right' }}>Price <SortIcon col="listed_price" /></th>
                     <th onClick={() => toggleSort('shipping_cost')} style={{ cursor: 'pointer', textAlign: 'right' }}>Shipping <SortIcon col="shipping_cost" /></th>
                     <th style={{ textAlign: 'right' }}>TCG fee</th>
@@ -1098,8 +1098,8 @@ export default function TcgplayerListings() {
                           ? l.all_card_names.split(', ').map((name, i) => <div key={i}>{name}</div>)
                           : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                       </td>
-                      <td className="text-right" style={{ fontWeight: (l.quantity ?? 1) > 1 ? 600 : 400, color: (l.quantity ?? 1) > 1 ? 'var(--text-primary)' : 'var(--text-muted)', fontSize: 13 }}>
-                        {l.quantity ?? 1}
+                      <td className="text-right" style={{ fontWeight: (l.total_quantity ?? 1) > 1 ? 600 : 400, color: (l.total_quantity ?? 1) > 1 ? 'var(--text-primary)' : 'var(--text-muted)', fontSize: 13 }}>
+                        {l.total_quantity ?? 1}
                       </td>
                       <td className="text-right text-gold">{usd(l.listed_price)}</td>
                       <td className="text-right text-muted">{usd(l.shipping_cost)}</td>
@@ -1151,7 +1151,7 @@ export default function TcgplayerListings() {
                           ? l.all_card_names.split(', ').map((name, i) => <div key={i}>{name}</div>)
                           : <span style={{ color: 'var(--text-muted)' }}>—</span>}
                       </td>
-                      <td className="text-right text-muted" style={{ fontSize: 13 }}>{l.quantity ?? 1}</td>
+                      <td className="text-right text-muted" style={{ fontSize: 13 }}>{l.total_quantity ?? 1}</td>
                       <td className="text-right text-gold">{usd(l.sold_price)}</td>
                       <td className="text-right text-muted">{usd(l.sold_shipping)}</td>
                       <td className="text-right text-muted">{usd(l.sold_fee)}</td>

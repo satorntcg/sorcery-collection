@@ -94,7 +94,8 @@ CREATE OR REPLACE VIEW public.v_ebay_active AS
             WHEN (elc.quantity > 1) THEN (' ×'::text || elc.quantity)
             ELSE ''::text
         END), ', '::text ORDER BY c2.name) AS all_card_names,
-    COALESCE(sum(elc.quantity), (0)::bigint) AS card_count
+    COALESCE(sum(elc.quantity), (0)::bigint) AS card_count,
+    (el.quantity * COALESCE(sum(elc.quantity), 1)) AS total_quantity
    FROM ((((ebay_listings el
      LEFT JOIN cards c ON ((c.id = el.card_id)))
      LEFT JOIN v_latest_prices lp ON ((lp.card_id = el.card_id)))
@@ -125,12 +126,17 @@ CREATE OR REPLACE VIEW public.v_ebay_sold AS
     c.rarity,
     c.foil,
     COALESCE(c.game_id, max(lc_cards.game_id::text)::uuid) AS game_id,
-    COALESCE(string_agg(DISTINCT lc_cards.name, ', '::text ORDER BY lc_cards.name) FILTER (WHERE (lc_cards.name IS NOT NULL)), c.name) AS all_card_names,
+    COALESCE(string_agg((lc_cards.name ||
+        CASE
+            WHEN (elc.quantity > 1) THEN (' ×'::text || elc.quantity)
+            ELSE ''::text
+        END), ', '::text ORDER BY lc_cards.name) FILTER (WHERE (lc_cards.name IS NOT NULL)), c.name) AS all_card_names,
     COALESCE(count(DISTINCT elc.card_id) FILTER (WHERE (elc.card_id IS NOT NULL)), (
         CASE
             WHEN (el.card_id IS NOT NULL) THEN 1
             ELSE 0
-        END)::bigint) AS card_count
+        END)::bigint) AS card_count,
+    (el.quantity * COALESCE(sum(elc.quantity), 1)) AS total_quantity
    FROM (((ebay_listings el
      LEFT JOIN cards c ON ((c.id = el.card_id)))
      LEFT JOIN ebay_listing_cards elc ON ((elc.listing_id = el.id)))
@@ -178,7 +184,8 @@ CREATE OR REPLACE VIEW public.v_tcgplayer_active AS
             WHEN (tlc.quantity > 1) THEN (' ×'::text || tlc.quantity)
             ELSE ''::text
         END), ', '::text ORDER BY c2.name) AS all_card_names,
-    COALESCE(sum(tlc.quantity), (0)::bigint) AS card_count
+    COALESCE(sum(tlc.quantity), (0)::bigint) AS card_count,
+    (tl.quantity * COALESCE(sum(tlc.quantity), 1)) AS total_quantity
    FROM ((((tcgplayer_listings tl
      LEFT JOIN cards c ON ((c.id = tl.card_id)))
      LEFT JOIN v_latest_prices lp ON ((lp.card_id = tl.card_id)))
@@ -210,12 +217,17 @@ CREATE OR REPLACE VIEW public.v_tcgplayer_sold AS
     c.rarity,
     c.foil,
     COALESCE(c.game_id, max(lc_cards.game_id::text)::uuid) AS game_id,
-    COALESCE(string_agg(DISTINCT lc_cards.name, ', '::text ORDER BY lc_cards.name) FILTER (WHERE (lc_cards.name IS NOT NULL)), c.name) AS all_card_names,
+    COALESCE(string_agg((lc_cards.name ||
+        CASE
+            WHEN (tlc.quantity > 1) THEN (' ×'::text || tlc.quantity)
+            ELSE ''::text
+        END), ', '::text ORDER BY lc_cards.name) FILTER (WHERE (lc_cards.name IS NOT NULL)), c.name) AS all_card_names,
     COALESCE(count(DISTINCT tlc.card_id) FILTER (WHERE (tlc.card_id IS NOT NULL)), (
         CASE
             WHEN (tl.card_id IS NOT NULL) THEN 1
             ELSE 0
-        END)::bigint) AS card_count
+        END)::bigint) AS card_count,
+    (tl.quantity * COALESCE(sum(tlc.quantity), 1)) AS total_quantity
    FROM (((tcgplayer_listings tl
      LEFT JOIN cards c ON ((c.id = tl.card_id)))
      LEFT JOIN tcgplayer_listing_cards tlc ON ((tlc.listing_id = tl.id)))
