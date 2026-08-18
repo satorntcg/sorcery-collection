@@ -29,7 +29,7 @@ Pure client-side SPA: Vite + React 18 + react-router-dom v6, talking directly to
 | `/inventory` | `Inventory.jsx` | Card list with inline edit |
 | `/alerts` | `Alerts.jsx` | Price alert review + dismiss |
 | `/listings` | `Ebaylistings.jsx` | eBay listing CRUD (2-step modal) |
-| `/tcgplayer` | `Tcgplayerlistings.jsx` | TCGPlayer listing CRUD (2-step modal, 10.25% fee) |
+| `/tcgplayer-listings` | `Tcgplayerlistings.jsx` | TCGPlayer listing CRUD (2-step modal, 10.25% fee) |
 | `/sales` | `Sales.jsx` | Combined eBay + TCGPlayer sold-cards feed, weekly/monthly breakdown |
 | `/suggestions` | `Listingsuggestions.jsx` | AI-powered lot grouping + eBay creation |
 | `/boxes` | `Boxes.jsx` | Sealed product P&L |

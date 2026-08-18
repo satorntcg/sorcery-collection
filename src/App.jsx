@@ -27,7 +27,7 @@ import BoxEV from './pages/BoxEV'
 
 // Short public redirect paths — no auth gate, no page flash. Add new ones here.
 const PUBLIC_REDIRECTS = {
-  '/shop/tcgplayer': 'https://www.tcgplayer.com/sellers/SatornTCG',
+  '/tcgplayer':      'https://www.tcgplayer.com/sellers/SatornTCG/f0dfddc3',
   '/ebay':           'https://www.ebay.com/str/satorntcg',
 }
 
@@ -126,7 +126,7 @@ export default function App() {
           <Route path="/inventory"   element={<Inventory />} />
           <Route path="/alerts"      element={<Alerts onDismiss={() => setAlertCount(c => Math.max(0, c - 1))} />} />
           <Route path="/listings"    element={<EbayListings />} />
-          <Route path="/tcgplayer"   element={<TcgplayerListings />} />
+          <Route path="/tcgplayer-listings" element={<TcgplayerListings />} />
           <Route path="/sales"       element={<Sales />} />
           <Route path="/boxes"       element={<Boxes />} />
           <Route path="/market"      element={<Market />} />

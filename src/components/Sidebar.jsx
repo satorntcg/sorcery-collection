@@ -15,7 +15,7 @@ const NAV = [
     items: [
       { to: '/inventory',    label: 'Cards',               icon: <CardsIcon /> },
       { to: '/listings',     label: 'eBay Listings',       icon: <TagIcon /> },
-      { to: '/tcgplayer',    label: 'TCGPlayer Listings',  icon: <TcgIcon /> },
+      { to: '/tcgplayer-listings', label: 'TCGPlayer Listings',  icon: <TcgIcon /> },
       { to: '/sales',        label: 'Sales',               icon: <SalesIcon /> },
       { to: '/suggestions',  label: 'Listing Suggestions', icon: <SparkleIcon /> },
       { to: '/boxes',        label: 'Boxes & P&L',         icon: <BoxIcon /> },

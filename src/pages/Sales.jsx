@@ -299,7 +299,7 @@ export default function Sales() {
                 <tr key={`${l.channel}-${l.id}`}>
                   <td>
                     <Link
-                      to={l.channel === 'ebay' ? `/listings?highlight=${l.id}&tab=sold` : `/tcgplayer?highlight=${l.id}&tab=sold`}
+                      to={l.channel === 'ebay' ? `/listings?highlight=${l.id}&tab=sold` : `/tcgplayer-listings?highlight=${l.id}&tab=sold`}
                       className="name-cell"
                       style={{ color: 'var(--gold)', textDecoration: 'none', borderBottom: '1px dashed var(--gold)' }}
                     >
