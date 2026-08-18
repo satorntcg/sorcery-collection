@@ -25,6 +25,17 @@ import Contact from './pages/Contact'
 import PublicVideos from './pages/PublicVideos'
 import BoxEV from './pages/BoxEV'
 
+// Short public redirect paths — no auth gate, no page flash. Add new ones here.
+const PUBLIC_REDIRECTS = {
+  '/shop/tcgplayer': 'https://www.tcgplayer.com/sellers/SatornTCG',
+  '/ebay':           'https://www.ebay.com/str/satorntcg',
+}
+
+function ExternalRedirect({ to }) {
+  useEffect(() => { window.location.replace(to) }, [to])
+  return null
+}
+
 function PublicLayout({ session }) {
   return (
     <>
@@ -84,6 +95,11 @@ export default function App() {
 
   return (
     <Routes>
+      {/* External redirects — bypass auth entirely, resolve before any UI renders */}
+      {Object.entries(PUBLIC_REDIRECTS).map(([path, url]) => (
+        <Route key={path} path={path} element={<ExternalRedirect to={url} />} />
+      ))}
+
       {/* Public routes — no auth required */}
       <Route element={<PublicLayout session={session} />}>
         <Route path="/"          element={<Home />} />
