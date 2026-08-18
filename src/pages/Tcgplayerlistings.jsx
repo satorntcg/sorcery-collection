@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Link } from 'react-router-dom'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useGame } from '../context/GameContext'
 import { gameConfig } from '../lib/games'
@@ -11,6 +11,10 @@ const calcNet = (price, shipping, fee) => price - fee - shipping
 const usd    = (n) => n == null ? '—' : `$${Number(n).toFixed(2)}`
 const fmtPnl = (n) => { if (n == null) return '—'; const v = Number(n); return `${v >= 0 ? '+$' : '-$'}${Math.abs(v).toFixed(2)}` }
 const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'
+const sameCardSets = (a, b) => {
+  const norm = arr => arr.map(c => `${c.id}:${c.qty ?? 1}`).sort().join(',')
+  return norm(a) === norm(b)
+}
 
 // ── Create modal (2-step: pick cards → set prices) ───────────
 function CreateModal({ cards, config, onClose, onSaved }) {
@@ -288,41 +292,96 @@ function CreateModal({ cards, config, onClose, onSaved }) {
 }
 
 // ── Sold modal ───────────────────────────────────────────────
-function SoldModal({ listing, onClose, onSaved }) {
+function SoldModal({ listing, cards, onClose, onSaved }) {
   const isEdit = listing.status === 'sold'
+  const [title, setTitle]               = useState(listing.title)
   const [soldPrice, setSoldPrice]       = useState(String(listing.sold_price ?? listing.listed_price ?? ''))
   const [soldShipping, setSoldShipping] = useState(String(listing.sold_shipping ?? listing.shipping_cost ?? TCG_SHIP_DEFAULT))
+  const [tcgUrl, setTcgUrl]             = useState(listing.tcgplayer_url || '')
   const [saving, setSaving]             = useState(false)
   const [error, setError]               = useState('')
-  // Cost basis isn't stored at listing-creation time anymore — for a first-time sale it's
-  // computed live from the linked cards' current cost basis, then frozen into the row so
-  // historical profit stays stable afterward. Editing an existing sale keeps that frozen value.
+  const [cardSearch, setCardSearch]     = useState('')
+  const [linkedCards, setLinkedCards]   = useState([])
+  const [initialLinkedCards, setInitialLinkedCards] = useState([])
+  const [loadingCards, setLoadingCards] = useState(true)
   const [costBasis, setCostBasis]       = useState(isEdit ? (listing.cost_basis ?? null) : null)
-  const [loadingCostBasis, setLoadingCostBasis] = useState(!isEdit)
+  const [loadingCostBasis, setLoadingCostBasis] = useState(true)
 
+  // Load existing linked cards (same source EditModal uses)
   useEffect(() => {
-    if (isEdit) return
+    async function loadLinked() {
+      setLoadingCards(true)
+      let initial = []
+      const { data: junctionRows } = await supabase
+        .from('tcgplayer_listing_cards')
+        .select('card_id, quantity, cards(id, name, rarity, foil, set_name)')
+        .eq('listing_id', listing.id)
+      if (junctionRows?.length) {
+        initial = junctionRows.map(r => ({ ...r.cards, qty: r.quantity ?? 1 })).filter(Boolean)
+      } else if (listing.card_id) {
+        const { data: card } = await supabase
+          .from('cards').select('id, name, rarity, foil, set_name')
+          .eq('id', listing.card_id).single()
+        if (card) initial = [{ ...card, qty: 1 }]
+      }
+      setLinkedCards(initial)
+      setInitialLinkedCards(initial)
+      setLoadingCards(false)
+    }
+    loadLinked()
+  }, [listing.id])
+
+  // Cost basis isn't stored at listing-creation time — it's computed live from the linked
+  // cards' current cost basis, then frozen into the row so historical profit stays stable
+  // afterward. Editing an existing sale keeps that frozen value UNLESS the linked cards
+  // themselves changed in this session, in which case it's recomputed for the new cards.
+  useEffect(() => {
+    if (loadingCards) return
+    if (isEdit && sameCardSets(linkedCards, initialLinkedCards)) {
+      setCostBasis(listing.cost_basis ?? null)
+      setLoadingCostBasis(false)
+      return
+    }
     let cancelled = false
     async function loadCostBasis() {
       setLoadingCostBasis(true)
       let total = 0
-      if (listing.card_id) {
-        const { data } = await supabase.from('v_latest_prices').select('cost_basis').eq('card_id', listing.card_id).maybeSingle()
-        total = Number(data?.cost_basis) || 0
-      } else {
-        const { data: lotCards } = await supabase.from('tcgplayer_listing_cards').select('card_id, quantity').eq('listing_id', listing.id)
-        const ids = (lotCards ?? []).map(lc => lc.card_id)
-        if (ids.length) {
-          const { data: prices } = await supabase.from('v_latest_prices').select('card_id, cost_basis').in('card_id', ids)
-          const byId = Object.fromEntries((prices ?? []).map(p => [p.card_id, Number(p.cost_basis) || 0]))
-          total = (lotCards ?? []).reduce((s, lc) => s + (byId[lc.card_id] ?? 0) * (lc.quantity ?? 1), 0)
-        }
+      const ids = linkedCards.map(c => c.id)
+      if (ids.length) {
+        const { data: prices } = await supabase.from('v_latest_prices').select('card_id, cost_basis').in('card_id', ids)
+        const byId = Object.fromEntries((prices ?? []).map(p => [p.card_id, Number(p.cost_basis) || 0]))
+        total = linkedCards.reduce((s, c) => s + (byId[c.id] ?? 0) * (c.qty ?? 1), 0)
       }
       if (!cancelled) { setCostBasis(total > 0 ? total : null); setLoadingCostBasis(false) }
     }
     loadCostBasis()
     return () => { cancelled = true }
-  }, [listing.id, listing.card_id, isEdit])
+  }, [linkedCards, initialLinkedCards, loadingCards, isEdit])
+
+  const filteredCards = cardSearch.length > 1
+    ? (cards || []).filter(c =>
+        c.name?.toLowerCase().includes(cardSearch.toLowerCase()) ||
+        c.set_name?.toLowerCase().includes(cardSearch.toLowerCase())
+      ).slice(0, 10)
+    : []
+
+  function addCard(card) {
+    setLinkedCards(prev => {
+      const exists = prev.find(c => c.id === card.id)
+      return exists
+        ? prev.map(c => c.id === card.id ? { ...c, qty: (c.qty ?? 1) + 1 } : c)
+        : [...prev, { ...card, qty: 1 }]
+    })
+  }
+
+  function removeCard(card) {
+    setLinkedCards(prev => {
+      const existing = prev.find(c => c.id === card.id)
+      if (!existing) return prev
+      if ((existing.qty ?? 1) <= 1) return prev.filter(c => c.id !== card.id)
+      return prev.map(c => c.id === card.id ? { ...c, qty: c.qty - 1 } : c)
+    })
+  }
 
   const sp = parseFloat(soldPrice) || 0
   const ss = parseFloat(soldShipping) || 0
@@ -332,16 +391,20 @@ function SoldModal({ listing, onClose, onSaved }) {
   const profit = costBasis != null ? net - costBasis : net
 
   async function handleSave() {
+    if (!title.trim()) { setError('Title is required.'); return }
     if (!sp) { setError('Enter the sold price.'); return }
     setSaving(true); setError('')
     try {
       const trueProfit = costBasis != null ? net - costBasis : net
       const update = {
+        title:         title.trim(),
         sold_price:    sp,
         sold_shipping: ss,
         sold_fee:      parseFloat(fee.toFixed(2)),
         cost_basis:    costBasis != null ? parseFloat(costBasis.toFixed(4)) : null,
         net_profit:    parseFloat(trueProfit.toFixed(2)),
+        tcgplayer_url: tcgUrl.trim() || null,
+        card_id:       linkedCards.length === 1 && (linkedCards[0].qty ?? 1) === 1 ? linkedCards[0].id : null,
       }
       // Only set status + sold_at if marking sold for the first time
       if (!isEdit) {
@@ -350,28 +413,38 @@ function SoldModal({ listing, onClose, onSaved }) {
       }
       const { error: err } = await supabase.from('tcgplayer_listings').update(update).eq('id', listing.id)
       if (err) throw err
-      // Only decrement inventory quantities when marking sold for the first time
-      if (!isEdit) {
-        const listingQty = listing.quantity ?? 1
-        if (listing.card_id) {
-          const { data: cardRow } = await supabase.from('cards').select('quantity_owned, quantity_listed').eq('id', listing.card_id).single()
-          if (cardRow) await supabase.from('cards').update({
-            quantity_listed: Math.max(0, (cardRow.quantity_listed ?? 0) - listingQty),
-            quantity_owned:  Math.max(0, (cardRow.quantity_owned  ?? 0) - listingQty),
-          }).eq('id', listing.card_id)
-        } else {
-          // Lot listing — decrement each card via tcgplayer_listing_cards
-          const { data: lotCards } = await supabase.from('tcgplayer_listing_cards').select('card_id, quantity').eq('listing_id', listing.id)
-          for (const lc of (lotCards ?? [])) {
-            const qty = (lc.quantity ?? 1) * listingQty
-            const { data: cardRow } = await supabase.from('cards').select('quantity_owned, quantity_listed').eq('id', lc.card_id).single()
-            if (cardRow) await supabase.from('cards').update({
-              quantity_listed: Math.max(0, (cardRow.quantity_listed ?? 0) - qty),
-              quantity_owned:  Math.max(0, (cardRow.quantity_owned  ?? 0) - qty),
-            }).eq('id', lc.card_id)
-          }
-        }
+
+      // Rebuild tcgplayer_listing_cards junction rows to match the (possibly edited) card list
+      await supabase.from('tcgplayer_listing_cards').delete().eq('listing_id', listing.id)
+      if (linkedCards.length > 0) {
+        const totalQty = linkedCards.reduce((sum, c) => sum + (c.qty ?? 1), 0)
+        const perCardPrice = parseFloat((sp / totalQty).toFixed(2))
+        await supabase.from('tcgplayer_listing_cards').insert(
+          linkedCards.map(c => ({ listing_id: listing.id, card_id: c.id, price: perCardPrice, quantity: c.qty ?? 1 }))
+        )
       }
+
+      // Adjust quantity_owned/quantity_listed: for a first-time sale nothing has been
+      // decremented yet (oldContrib is empty), so this decrements the full new amount. For
+      // an edit, initialLinkedCards is what was already decremented, so this only applies
+      // the delta — e.g. swapping the linked card gives the old one its stock back and
+      // decrements the correct one instead.
+      const listingQty = listing.quantity ?? 1
+      const oldContrib = {}
+      if (isEdit) for (const c of initialLinkedCards) oldContrib[c.id] = (oldContrib[c.id] ?? 0) + (c.qty ?? 1) * listingQty
+      const newContrib = {}
+      for (const c of linkedCards) newContrib[c.id] = (newContrib[c.id] ?? 0) + (c.qty ?? 1) * listingQty
+      const affectedIds = new Set([...Object.keys(oldContrib), ...Object.keys(newContrib)])
+      for (const cardId of affectedIds) {
+        const delta = (newContrib[cardId] ?? 0) - (oldContrib[cardId] ?? 0)
+        if (delta === 0) continue
+        const { data: cardRow } = await supabase.from('cards').select('quantity_owned, quantity_listed').eq('id', cardId).single()
+        if (cardRow) await supabase.from('cards').update({
+          quantity_owned:  Math.max(0, (cardRow.quantity_owned  ?? 0) - delta),
+          quantity_listed: Math.max(0, (cardRow.quantity_listed ?? 0) - delta),
+        }).eq('id', cardId)
+      }
+
       onSaved()
     } catch (e) { setError(e.message) } finally { setSaving(false) }
   }
@@ -384,7 +457,10 @@ function SoldModal({ listing, onClose, onSaved }) {
           <button className="btn btn-ghost btn-sm" onClick={onClose}>✕</button>
         </div>
         <div className="modal-body">
-          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 16 }}>{listing.title}</div>
+          <div className="form-group">
+            <label className="form-label">Title</label>
+            <input className="form-input" type="text" value={title} onChange={e => setTitle(e.target.value)} />
+          </div>
           <div className="form-row">
             <div className="form-group">
               <label className="form-label">Sold price ($)</label>
@@ -416,6 +492,66 @@ function SoldModal({ listing, onClose, onSaved }) {
               </div>
               {costBasis != null && <div className="metric-sub">after cost basis {usd(costBasis)}</div>}
             </div>
+          </div>
+
+          <div className="form-group" style={{ marginTop: 16 }}>
+            <label className="form-label">TCGPlayer listing URL</label>
+            <input className="form-input" type="text" value={tcgUrl} onChange={e => setTcgUrl(e.target.value)} placeholder="https://tcgplayer.com/…" />
+          </div>
+
+          {/* Card linking */}
+          <div className="form-group">
+            <label className="form-label">Linked cards</label>
+            {loadingCards ? (
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>Loading…</div>
+            ) : linkedCards.length > 0 ? (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+                {linkedCards.map(c => (
+                  <div key={c.id} style={{
+                    display: 'flex', alignItems: 'center', gap: 6,
+                    fontSize: 12, padding: '3px 8px',
+                    background: 'rgba(201,168,76,0.08)',
+                    border: '1px solid var(--border-mid)',
+                    borderRadius: 4, color: 'var(--gold-light)',
+                  }}>
+                    {c.name}{c.foil ? ' ✦' : ''}
+                    {(c.qty ?? 1) > 1 && <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>×{c.qty}</span>}
+                    <button onClick={() => removeCard(c)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', fontSize: 14, padding: 0, lineHeight: 1 }}>×</button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>No cards linked — search to add</div>
+            )}
+            <input
+              className="form-input"
+              placeholder="Search to link a card…"
+              value={cardSearch}
+              onChange={e => setCardSearch(e.target.value)}
+              style={{ fontSize: 13 }}
+            />
+            {filteredCards.length > 0 && (
+              <div style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', marginTop: 4, maxHeight: 200, overflowY: 'auto', background: 'var(--bg-void)' }}>
+                {filteredCards.map(c => {
+                  const isLinked = linkedCards.find(lc => lc.id === c.card_id)
+                  return (
+                    <div
+                      key={c.card_id}
+                      onClick={e => { e.stopPropagation(); addCard({ id: c.card_id, name: c.name, rarity: c.rarity, foil: c.foil, set_name: c.set_name }); setCardSearch('') }}
+                      style={{
+                        padding: '8px 12px', cursor: 'pointer', fontSize: 13,
+                        background: isLinked ? 'rgba(201,168,76,0.06)' : 'transparent',
+                        borderBottom: '1px solid var(--border)',
+                        display: 'flex', justifyContent: 'space-between',
+                      }}
+                    >
+                      <span style={{ color: 'var(--text-primary)' }}>{c.name}{c.foil ? ' ✦' : ''}</span>
+                      <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>{c.rarity} · {c.set_name}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
 
           {error && <div className="alert-item danger mt-16"><span className="alert-content">{error}</span></div>}
@@ -910,6 +1046,25 @@ export default function TcgplayerListings() {
   const [sortBy, setSortBy]           = useState('listed_at')
   const [sortDir, setSortDir]         = useState('desc')
 
+  const [searchParams] = useSearchParams()
+  const highlightId = searchParams.get('highlight')
+  const highlightTab = searchParams.get('tab')
+  const highlightRef = useRef(null)
+
+  // If arriving with a highlight param (e.g. from Sales.jsx), jump to the requested tab
+  useEffect(() => {
+    if (highlightId) setTab(highlightTab === 'sold' ? 'sold' : 'active')
+  }, [highlightId, highlightTab])
+
+  // Scroll to highlighted row after data loads and DOM renders
+  useEffect(() => {
+    if (!highlightId || loading) return
+    const timer = setTimeout(() => {
+      highlightRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, 150)
+    return () => clearTimeout(timer)
+  }, [highlightId, loading])
+
   useEffect(() => { setCards([]) }, [activeGame.id])
 
   const fetchCards = useCallback(async () => {
@@ -931,10 +1086,13 @@ export default function TcgplayerListings() {
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
+    // Unlinked listings (no card_id, no lot cards) have no computed game_id to match against —
+    // include them under every game instead of hiding them until they're linked.
+    const gameOrUnlinked = `game_id.eq.${activeGame.id},game_id.is.null`
     const [activeRes, soldRes, pnlRes] = await Promise.all([
-      supabase.from('v_tcgplayer_active').select('*').eq('game_id', activeGame.id),
-      supabase.from('v_tcgplayer_sold').select('*').eq('game_id', activeGame.id),
-      supabase.from('v_tcgplayer_pnl').select('*').single(),
+      supabase.from('v_tcgplayer_active').select('*').or(gameOrUnlinked),
+      supabase.from('v_tcgplayer_sold').select('*').or(gameOrUnlinked),
+      supabase.from('v_tcgplayer_pnl_by_game').select('*').eq('game_id', activeGame.id).maybeSingle(),
     ])
     setListings([
       ...(activeRes.data || []).map(r => ({ ...r, status: 'active' })),
@@ -1082,8 +1240,10 @@ export default function TcgplayerListings() {
                     <th onClick={() => toggleSort('listed_at')} style={{ cursor: 'pointer' }}>Listed <SortIcon col="listed_at" /></th>
                     <th></th>
                   </tr></thead>
-                  <tbody>{sorted.map(l => (
-                    <tr key={l.id}>
+                  <tbody>{sorted.map(l => {
+                    const isHighlighted = highlightId && highlightId === String(l.id)
+                    return (
+                    <tr key={l.id} ref={isHighlighted ? highlightRef : null} style={isHighlighted ? { background: 'rgba(201,168,76,0.10)', outline: '1px solid rgba(201,168,76,0.4)' } : undefined}>
                       <td>
                         <div className="name-cell">{l.card_name || l.title}</div>
                         {l.card_name && <div className="set-cell">{l.rarity}{l.foil ? ' · Foil' : ''}{l.set_name ? ` · ${l.set_name}` : ''}{l.tcg_market_price ? ` · TCG ${usd(l.tcg_market_price)}` : ''}</div>}
@@ -1112,13 +1272,13 @@ export default function TcgplayerListings() {
                           {!l.card_name && !l.card_id && !(l.card_count > 0) && (
                             <button className="btn btn-sm btn-ghost" style={{ color: 'var(--gold)', borderColor: 'rgba(201,168,76,0.3)' }} onClick={() => { fetchCards(); setLinkTarget(l) }}>Link</button>
                           )}
-                          <button className="btn btn-sm btn-ghost" style={{ color: 'var(--success)', borderColor: 'rgba(76,175,110,0.3)' }} onClick={() => setSoldTarget(l)}>Sold</button>
+                          <button className="btn btn-sm btn-ghost" style={{ color: 'var(--success)', borderColor: 'rgba(76,175,110,0.3)' }} onClick={() => { fetchCards(); setSoldTarget(l) }}>Sold</button>
                           <button className="btn btn-sm btn-ghost" onClick={() => { fetchCards(); setEditTarget(l) }}>Edit</button>
                           <button className="btn btn-sm btn-ghost btn-danger" onClick={() => setEndTarget(l)}>End</button>
                         </div>
                       </td>
                     </tr>
-                  ))}</tbody>
+                  )})}</tbody>
                 </>
               ) : (
                 <>
@@ -1135,8 +1295,10 @@ export default function TcgplayerListings() {
                     <th onClick={() => toggleSort('sold_at')} style={{ cursor: 'pointer' }}>Sold <SortIcon col="sold_at" /></th>
                     <th></th>
                   </tr></thead>
-                  <tbody>{sorted.map(l => (
-                    <tr key={l.id}>
+                  <tbody>{sorted.map(l => {
+                    const isHighlighted = highlightId && highlightId === String(l.id)
+                    return (
+                    <tr key={l.id} ref={isHighlighted ? highlightRef : null} style={isHighlighted ? { background: 'rgba(201,168,76,0.10)', outline: '1px solid rgba(201,168,76,0.4)' } : undefined}>
                       <td>
                         <div className="name-cell">{l.card_name || l.title}</div>
                         {l.card_name && <div className="set-cell">{l.rarity}{l.foil ? ' · Foil' : ''}{l.set_name ? ` · ${l.set_name}` : ''}</div>}
@@ -1161,12 +1323,12 @@ export default function TcgplayerListings() {
                       <td className="text-muted" style={{ fontSize: 12 }}>{fmtDate(l.sold_at)}</td>
                       <td>
                         <div style={{ display: 'flex', gap: 6 }}>
-                          <button className="btn btn-sm btn-ghost" onClick={() => setSoldTarget(l)}>Edit sale</button>
+                          <button className="btn btn-sm btn-ghost" onClick={() => { fetchCards(); setSoldTarget(l) }}>Edit sale</button>
                           <button className="btn btn-sm btn-ghost btn-danger" onClick={() => setDeleteSoldTarget(l)}>Delete</button>
                         </div>
                       </td>
                     </tr>
-                  ))}</tbody>
+                  )})}</tbody>
                 </>
               )}
             </table>
@@ -1175,6 +1337,12 @@ export default function TcgplayerListings() {
       )}
 
       {/* ── Business P&L tab ── */}
+      {tab === 'pnl' && !pnl && (
+        <div className="empty-state">
+          <div className="empty-state-icon">🏷️</div>
+          No TCGPlayer activity yet for {config.displayName}.
+        </div>
+      )}
       {tab === 'pnl' && pnl && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
           {[
@@ -1205,7 +1373,7 @@ export default function TcgplayerListings() {
       {/* Modals */}
       {showCreate && <CreateModal cards={cards} config={config} onClose={() => setShowCreate(false)} onSaved={onSaved} />}
       {editTarget  && <EditModal  listing={editTarget} cards={cards} onClose={() => setEditTarget(null)} onSaved={onSaved} />}
-      {soldTarget  && <SoldModal  listing={soldTarget} onClose={() => setSoldTarget(null)} onSaved={onSaved} />}
+      {soldTarget  && <SoldModal  listing={soldTarget} cards={cards} onClose={() => setSoldTarget(null)} onSaved={onSaved} />}
       {endTarget   && <EndModal   listing={endTarget}  onClose={() => setEndTarget(null)}  onSaved={onSaved} />}
       {linkTarget  && <LinkCardModal listing={linkTarget} cards={cards} onClose={() => setLinkTarget(null)} onSaved={onSaved} />}
       {deleteSoldTarget && <DeleteSoldModal listing={deleteSoldTarget} onClose={() => setDeleteSoldTarget(null)} onSaved={onSaved} />}

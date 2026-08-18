@@ -19,9 +19,11 @@ The frontend currently reads these app-facing views:
 - `v_ebay_active`
 - `v_ebay_sold`
 - `v_global_pnl`
+- `v_ebay_pnl_by_game`
 - `v_tcgplayer_active`
 - `v_tcgplayer_sold`
 - `v_tcgplayer_pnl`
+- `v_tcgplayer_pnl_by_game`
 - `v_combined_pnl`
 - `v_box_pnl`
 - `v_price_gainers_losers`

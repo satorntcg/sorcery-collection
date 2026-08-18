@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
+import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import {
   BarChart, Bar, Cell, XAxis, YAxis, Tooltip, Legend,
@@ -60,12 +61,15 @@ export default function Sales() {
 
   const fetchAll = useCallback(async () => {
     setLoading(true)
+    // Unlinked listings (no card_id, no lot cards) have no computed game_id to match against —
+    // include them under every game instead of hiding them until they're linked.
+    const gameOrUnlinked = `game_id.eq.${activeGame.id},game_id.is.null`
     const [ebayRes, tcgRes] = await Promise.all([
-      supabase.from('v_ebay_sold').select('*').eq('game_id', activeGame.id),
-      supabase.from('v_tcgplayer_sold').select('*').eq('game_id', activeGame.id),
+      supabase.from('v_ebay_sold').select('*').or(gameOrUnlinked),
+      supabase.from('v_tcgplayer_sold').select('*').or(gameOrUnlinked),
     ])
-    const ebay = (ebayRes.data ?? []).map(l => ({ ...l, channel: 'ebay', fee: l.sold_ebay_fee, url: l.ebay_url }))
-    const tcg  = (tcgRes.data ?? []).map(l => ({ ...l, channel: 'tcgplayer', fee: l.sold_fee, url: l.tcgplayer_url }))
+    const ebay = (ebayRes.data ?? []).map(l => ({ ...l, channel: 'ebay', fee: l.sold_ebay_fee }))
+    const tcg  = (tcgRes.data ?? []).map(l => ({ ...l, channel: 'tcgplayer', fee: l.sold_fee }))
     setSales([...ebay, ...tcg])
     setLoading(false)
   }, [activeGame.id])
@@ -294,13 +298,14 @@ export default function Sales() {
               <tbody>{sorted.map(l => (
                 <tr key={`${l.channel}-${l.id}`}>
                   <td>
-                    <div className="name-cell">{l.card_name || l.title}</div>
+                    <Link
+                      to={l.channel === 'ebay' ? `/listings?highlight=${l.id}&tab=sold` : `/tcgplayer?highlight=${l.id}&tab=sold`}
+                      className="name-cell"
+                      style={{ color: 'var(--gold)', textDecoration: 'none', borderBottom: '1px dashed var(--gold)' }}
+                    >
+                      {l.card_name || l.title}
+                    </Link>
                     {l.card_name && <div className="set-cell">{l.rarity}{l.foil ? ' · Foil' : ''}{l.set_name ? ` · ${l.set_name}` : ''}</div>}
-                    {l.url && (
-                      <a href={l.url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: 'var(--gold)', textDecoration: 'none', borderBottom: '1px dashed var(--gold)' }}>
-                        ↗ {l.channel === 'ebay' ? 'eBay' : 'TCGPlayer'}
-                      </a>
-                    )}
                   </td>
                   <td style={{ fontSize: 12, color: 'var(--text-secondary)', maxWidth: 160 }}>
                     {l.all_card_names && l.card_count > 1

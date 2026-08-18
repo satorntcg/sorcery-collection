@@ -145,6 +145,45 @@ CREATE OR REPLACE VIEW public.v_ebay_sold AS
   GROUP BY el.id, el.title, el.listed_price, el.shipping_cost, el.sold_price, el.sold_shipping, el.sold_ebay_fee, el.cost_basis, el.net_profit, el.sold_at, el.listed_at, el.condition, el.notes, el.ebay_url, el.card_id, c.name, c.set_name, c.rarity, c.foil, c.game_id
   ORDER BY el.sold_at DESC;
 
+-- Per-game equivalent of v_global_pnl, used by Ebaylistings.jsx instead of v_global_pnl so its
+-- metric cards/Business P&L tab respect the active game. Unlike v_ebay_active/v_ebay_sold's
+-- game_id (which is NULL, not filtered out, for a listing with no linked card), rows with a NULL
+-- computed game_id are excluded here -- there's no game to attribute that revenue to until the
+-- listing is linked. v_global_pnl itself stays whole-account (v_combined_pnl/Dashboard depend on
+-- that).
+CREATE OR REPLACE VIEW public.v_ebay_pnl_by_game AS
+ WITH listing_game AS (
+   SELECT el.id,
+      el.status,
+      el.sold_price,
+      el.sold_ebay_fee,
+      el.sold_shipping,
+      el.cost_basis,
+      el.net_profit,
+      el.listed_price,
+      el.net_listed,
+      COALESCE(c.game_id, max(c2.game_id::text)::uuid) AS game_id
+     FROM (((ebay_listings el
+       LEFT JOIN cards c ON ((c.id = el.card_id)))
+       LEFT JOIN ebay_listing_cards elc ON ((elc.listing_id = el.id)))
+       LEFT JOIN cards c2 ON ((c2.id = elc.card_id)))
+    GROUP BY el.id, el.status, el.sold_price, el.sold_ebay_fee, el.sold_shipping, el.cost_basis, el.net_profit, el.listed_price, el.net_listed, c.game_id
+ )
+ SELECT game_id,
+    COALESCE(sum(sold_price) FILTER (WHERE (status = 'sold'::text)), (0)::numeric) AS total_revenue,
+    COALESCE(sum(sold_ebay_fee) FILTER (WHERE (status = 'sold'::text)), (0)::numeric) AS total_ebay_fees,
+    COALESCE(sum(sold_shipping) FILTER (WHERE (status = 'sold'::text)), (0)::numeric) AS total_shipping_paid,
+    COALESCE(sum(cost_basis) FILTER (WHERE (status = 'sold'::text)), (0)::numeric) AS total_cogs,
+    COALESCE(sum(net_profit) FILTER (WHERE (status = 'sold'::text)), (0)::numeric) AS total_net_profit,
+    count(*) FILTER (WHERE (status = 'active'::text)) AS active_listings_count,
+    COALESCE(sum(listed_price) FILTER (WHERE (status = 'active'::text)), (0)::numeric) AS active_listings_gmv,
+    COALESCE(sum(net_listed) FILTER (WHERE (status = 'active'::text)), (0)::numeric) AS active_listings_net_if_sold,
+    count(*) FILTER (WHERE (status = 'sold'::text)) AS total_sold,
+    count(*) AS total_listings
+   FROM listing_game
+  WHERE (game_id IS NOT NULL)
+  GROUP BY game_id;
+
 CREATE OR REPLACE VIEW public.v_global_pnl AS
  SELECT COALESCE(sum(sold_price) FILTER (WHERE (status = 'sold'::text)), (0)::numeric) AS total_revenue,
     COALESCE(sum(sold_ebay_fee) FILTER (WHERE (status = 'sold'::text)), (0)::numeric) AS total_ebay_fees,
@@ -248,6 +287,43 @@ CREATE OR REPLACE VIEW public.v_tcgplayer_pnl AS
     count(*) FILTER (WHERE (status = 'sold'::text)) AS total_sold,
     count(*) AS total_listings
    FROM tcgplayer_listings;
+
+-- Per-game equivalent of v_tcgplayer_pnl, used by Tcgplayerlistings.jsx instead of
+-- v_tcgplayer_pnl so its metric cards/Business P&L tab respect the active game. See
+-- v_ebay_pnl_by_game above for why unlinked listings (NULL computed game_id) are excluded here
+-- specifically, and why v_tcgplayer_pnl itself stays whole-account.
+CREATE OR REPLACE VIEW public.v_tcgplayer_pnl_by_game AS
+ WITH listing_game AS (
+   SELECT tl.id,
+      tl.status,
+      tl.sold_price,
+      tl.sold_fee,
+      tl.sold_shipping,
+      tl.cost_basis,
+      tl.net_profit,
+      tl.listed_price,
+      tl.net_listed,
+      COALESCE(c.game_id, max(c2.game_id::text)::uuid) AS game_id
+     FROM (((tcgplayer_listings tl
+       LEFT JOIN cards c ON ((c.id = tl.card_id)))
+       LEFT JOIN tcgplayer_listing_cards tlc ON ((tlc.listing_id = tl.id)))
+       LEFT JOIN cards c2 ON ((c2.id = tlc.card_id)))
+    GROUP BY tl.id, tl.status, tl.sold_price, tl.sold_fee, tl.sold_shipping, tl.cost_basis, tl.net_profit, tl.listed_price, tl.net_listed, c.game_id
+ )
+ SELECT game_id,
+    COALESCE(sum(sold_price) FILTER (WHERE (status = 'sold'::text)), (0)::numeric) AS total_revenue,
+    COALESCE(sum(sold_fee) FILTER (WHERE (status = 'sold'::text)), (0)::numeric) AS total_tcg_fees,
+    COALESCE(sum(sold_shipping) FILTER (WHERE (status = 'sold'::text)), (0)::numeric) AS total_shipping_paid,
+    COALESCE(sum(cost_basis) FILTER (WHERE (status = 'sold'::text)), (0)::numeric) AS total_cogs,
+    COALESCE(sum(net_profit) FILTER (WHERE (status = 'sold'::text)), (0)::numeric) AS total_net_profit,
+    count(*) FILTER (WHERE (status = 'active'::text)) AS active_listings_count,
+    COALESCE(sum(listed_price) FILTER (WHERE (status = 'active'::text)), (0)::numeric) AS active_listings_gmv,
+    COALESCE(sum(net_listed) FILTER (WHERE (status = 'active'::text)), (0)::numeric) AS active_listings_net_if_sold,
+    count(*) FILTER (WHERE (status = 'sold'::text)) AS total_sold,
+    count(*) AS total_listings
+   FROM listing_game
+  WHERE (game_id IS NOT NULL)
+  GROUP BY game_id;
 
 -- Combines eBay + TCGPlayer P&L so "business profit" (revenue − fees − box costs) can be
 -- computed once against combined COGS, instead of once per channel against the full box
