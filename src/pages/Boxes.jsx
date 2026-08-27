@@ -24,6 +24,7 @@ const PULL_BLANK = {
   packId:           '',
   newPackNumber:    '',
   quantity:         1,
+  skipInventory:    false,
 }
 
 export default function Boxes() {
@@ -252,11 +253,11 @@ export default function Boxes() {
         if (item.mode === 'new') {
           const { data: newCard, error: cardErr } = await supabase
             .from('cards')
-            .insert({ name: item.cardName.trim(), set_name: item.setName, rarity: item.rarity, condition: item.condition, foil: item.foil, quantity_owned: qty, game_id: activeGame.id })
+            .insert({ name: item.cardName.trim(), set_name: item.setName, rarity: item.rarity, condition: item.condition, foil: item.foil, quantity_owned: pullForm.skipInventory ? 0 : qty, game_id: activeGame.id })
             .select('id').single()
           if (cardErr) { alert(`Card creation failed: ${cardErr.message}`); setPullSaving(false); return }
           cardId = newCard.id
-        } else {
+        } else if (!pullForm.skipInventory) {
           const { data: existing, error: fetchErr } = await supabase.from('cards').select('quantity_owned').eq('id', cardId).single()
           if (fetchErr) { alert(`Could not fetch card: ${fetchErr.message}`); setPullSaving(false); return }
           const { error: updErr } = await supabase.from('cards').update({ quantity_owned: (existing.quantity_owned ?? 0) + qty }).eq('id', cardId)
@@ -862,7 +863,12 @@ export default function Boxes() {
               )}
 
             </div>
-            <div className="modal-footer">
+            <div className="modal-footer" style={{ justifyContent: 'space-between' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 12, color: 'var(--text-secondary)' }} title="Log these cards to the pack for video/box tracking, but don't add them to sellable inventory (e.g. they already sold before filming).">
+                <input type="checkbox" checked={pullForm.skipInventory} onChange={e => pf('skipInventory', e.target.checked)} style={{ width: 15, height: 15, accentColor: 'var(--gold)' }} />
+                Don't update inventory
+              </label>
+              <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn" onClick={() => setPullModal(false)}>Cancel</button>
               <button
                 className="btn btn-primary"
@@ -871,6 +877,7 @@ export default function Boxes() {
               >
                 {pullSaving ? 'Saving…' : `Log ${pullItems.length || ''} pull${pullItems.length !== 1 ? 's' : ''}`}
               </button>
+              </div>
             </div>
           </div>
         </div>
