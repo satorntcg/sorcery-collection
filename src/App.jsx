@@ -51,11 +51,11 @@ function PrivateGuard({ session }) {
   return <Outlet />
 }
 
-function PrivateLayout({ alertCount }) {
+function PrivateLayout() {
   return (
     <GameProvider>
       <div className="app-shell">
-        <Sidebar alertCount={alertCount} onSignOut={() => supabase.auth.signOut()} />
+        <Sidebar onSignOut={() => supabase.auth.signOut()} />
         <main className="main-content">
           <Outlet />
         </main>
@@ -65,8 +65,7 @@ function PrivateLayout({ alertCount }) {
 }
 
 export default function App() {
-  const [session,    setSession]    = useState(undefined)
-  const [alertCount, setAlertCount] = useState(0)
+  const [session, setSession] = useState(undefined)
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => setSession(session))
@@ -75,23 +74,6 @@ export default function App() {
     })
     return () => subscription.unsubscribe()
   }, [])
-
-  useEffect(() => {
-    if (!session) return
-    async function fetchAlertCount() {
-      const { count } = await supabase
-        .from('v_active_alerts')
-        .select('*', { count: 'exact', head: true })
-        .gte('new_price', 1)
-      setAlertCount(count ?? 0)
-    }
-    fetchAlertCount()
-    const channel = supabase
-      .channel('alert-count')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'price_alerts' }, fetchAlertCount)
-      .subscribe()
-    return () => supabase.removeChannel(channel)
-  }, [session])
 
   return (
     <Routes>
@@ -121,10 +103,10 @@ export default function App() {
 
       {/* Private routes — require auth, render with sidebar */}
       <Route element={<PrivateGuard session={session} />}>
-        <Route element={<PrivateLayout alertCount={alertCount} />}>
+        <Route element={<PrivateLayout />}>
           <Route path="/dashboard"   element={<Dashboard />} />
           <Route path="/inventory"   element={<Inventory />} />
-          <Route path="/alerts"      element={<Alerts onDismiss={() => setAlertCount(c => Math.max(0, c - 1))} />} />
+          <Route path="/alerts"      element={<Alerts />} />
           <Route path="/listings"    element={<EbayListings />} />
           <Route path="/tcgplayer-listings" element={<TcgplayerListings />} />
           <Route path="/sales"       element={<Sales />} />

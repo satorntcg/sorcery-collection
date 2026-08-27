@@ -10,6 +10,7 @@ export function GameProvider({ children }) {
   const [games, setGames] = useState([])
   const [activeGame, setActiveGameState] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [alertCount, setAlertCount] = useState(0)
 
   useEffect(() => {
     async function load() {
@@ -32,12 +33,34 @@ export function GameProvider({ children }) {
     if (game) localStorage.setItem(STORAGE_KEY, game.slug)
   }
 
+  function decrementAlertCount(n = 1) {
+    setAlertCount(c => Math.max(0, c - n))
+  }
+
+  useEffect(() => {
+    if (!activeGame) return
+    async function fetchAlertCount() {
+      const { count } = await supabase
+        .from('v_active_alerts')
+        .select('*', { count: 'exact', head: true })
+        .eq('game_id', activeGame.id)
+        .gte('new_price', 1)
+      setAlertCount(count ?? 0)
+    }
+    fetchAlertCount()
+    const channel = supabase
+      .channel(`alert-count-${activeGame.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'price_alerts' }, fetchAlertCount)
+      .subscribe()
+    return () => supabase.removeChannel(channel)
+  }, [activeGame])
+
   if (loading || !activeGame) {
     return <div className="loading" style={{ height: '100vh' }}>Loading…</div>
   }
 
   return (
-    <GameContext.Provider value={{ games, activeGame, setActiveGame }}>
+    <GameContext.Provider value={{ games, activeGame, setActiveGame, alertCount, decrementAlertCount }}>
       {children}
     </GameContext.Provider>
   )

@@ -33,8 +33,8 @@ const NAV = [
   },
 ]
 
-export default function Sidebar({ alertCount = 0, onSignOut }) {
-  const { games, activeGame, setActiveGame } = useGame()
+export default function Sidebar({ onSignOut }) {
+  const { games, activeGame, setActiveGame, alertCount } = useGame()
 
   return (
     <aside className="sidebar">

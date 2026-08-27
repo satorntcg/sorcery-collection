@@ -88,17 +88,17 @@ Most app-facing views above also expose a `game_id` column (added in the 2026-08
 
 The app tracks multiple TCGs (Sorcery, Riftbound, more later) in one shared schema. `cards` and `boxes` — the two root entities everything else joins through — carry a `game_id` FK into the `games` table; every other table (`price_snapshots`, `ebay_listings`, `tcgplayer_listings`, `packs`, `pack_cards`, `youtube_openings`, junctions) is scoped transitively via `card_id`/`box_id`, not its own `game_id` column.
 
-- **`src/context/GameContext.jsx`** — `GameProvider` (wraps the private app shell in `App.jsx`, inside `PrivateLayout`) fetches `games` once, tracks `activeGame` (persisted to `localStorage`), and exposes `useGame()` → `{ games, activeGame, setActiveGame }`. Public routes (`Home.jsx`, `PublicCards.jsx`, `CardDetail.jsx`, `RulesChat.jsx`) render outside this provider and are **not** game-scoped — they only ever show Sorcery data today.
+- **`src/context/GameContext.jsx`** — `GameProvider` (wraps the private app shell in `App.jsx`, inside `PrivateLayout`) fetches `games` once, tracks `activeGame` (persisted to `localStorage`), and exposes `useGame()` → `{ games, activeGame, setActiveGame, alertCount, decrementAlertCount }`. `alertCount` is the sidebar's Price Alerts badge count, scoped to `activeGame.id` and refetched whenever the active game changes or `price_alerts` changes via realtime (see "Realtime" below); `Dashboard.jsx`/`Alerts.jsx` call `decrementAlertCount(n = 1)` after dismissing so the badge updates instantly instead of waiting on the realtime round-trip. Public routes (`Home.jsx`, `PublicCards.jsx`, `CardDetail.jsx`, `RulesChat.jsx`) render outside this provider and are **not** game-scoped — they only ever show Sorcery data today.
 - **`src/lib/games.js`** — `GAME_CONFIG[slug]` is the single source of per-game vocabulary: `rarities`, `cardTypes`, `sets`, `defaultSet`/`defaultRarity`, `tcgplayerSlug` (for building TCGPlayer search links), `fillerCardValue` (BoxEV's flat per-pack filler-card estimate), `rarityMap` (Import.jsx normalization), and `grouping` (Listing Suggestions tier config: `eligibleRarities`, `soloRarities`, `secondaryRarity`, `pooledSpecialType`/`pooledSpecialLabel`). Adding a new game = one row in `games` (via SQL) + one entry here.
 - **`Sidebar.jsx`** renders a game switcher (`<select>`) when more than one game is active.
 - Every scoped page follows the same pattern: table/view queries gain `.eq('game_id', activeGame.id)`, insert payloads gain `game_id: activeGame.id`, and hard-coded rarity/set/card-type dropdown arrays are replaced by `gameConfig(activeGame.slug)` lookups.
-- `check_schedule` (price-check cadence/alert thresholds), `v_combined_pnl`/`v_global_pnl`/`v_tcgplayer_pnl` (channel P&L), and the sidebar's alert-count badge are deliberately **not** game-scoped — they stay whole-account totals.
+- `check_schedule` (price-check cadence/alert thresholds) and `v_combined_pnl`/`v_global_pnl`/`v_tcgplayer_pnl` (channel P&L) are deliberately **not** game-scoped — they stay whole-account totals. The sidebar's alert-count badge, by contrast, **is** game-scoped (see `GameContext.jsx` above) — it only counts the active game's undismissed alerts.
 - `daily_price_check` needs no game awareness — it prices every card by `tcgplayer_id` regardless of game.
 - Migration: `supabase/migrations/20260810_multi_game_support.sql`.
 
 ### Realtime
 
-`src/App.jsx` subscribes to `postgres_changes` on `price_alerts` to keep the sidebar badge live. Other pages re-fetch on mount; only the alert badge uses realtime.
+`src/context/GameContext.jsx`'s `GameProvider` subscribes to `postgres_changes` on `price_alerts` to keep the sidebar badge (`alertCount`) live — this requires `price_alerts` to be added to the `supabase_realtime` publication (`supabase/migrations/20260826_realtime_price_alerts.sql`; it was missing from the initial schema, which silently broke live updates). Other pages re-fetch on mount; only the alert badge uses realtime.
 
 ### Pricing pipeline
 

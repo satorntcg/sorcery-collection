@@ -43,7 +43,7 @@ function PriceChange({ value }) {
 
 export default function Dashboard() {
   const navigate = useNavigate()
-  const { activeGame } = useGame()
+  const { activeGame, decrementAlertCount } = useGame()
   const config = gameConfig(activeGame.slug)
   const [inventory, setInventory] = useState([])
   const [alerts, setAlerts]       = useState([])
@@ -84,6 +84,7 @@ export default function Dashboard() {
   async function dismissAlert(id) {
     await supabase.from('price_alerts').update({ dismissed: true }).eq('id', id)
     setAlerts(prev => prev.filter(a => a.id !== id))
+    decrementAlertCount()
   }
 
   const totalMarketValue   = inventory.reduce((s, c) => s + (getMarketValue(c) ?? 0), 0)

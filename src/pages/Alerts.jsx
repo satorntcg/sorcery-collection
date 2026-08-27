@@ -14,9 +14,9 @@ const TABS = [
   { id: 'price_alerts', label: 'Price alerts'    },
 ]
 
-export default function Alerts({ onDismiss }) {
+export default function Alerts() {
   const navigate = useNavigate()
-  const { activeGame } = useGame()
+  const { activeGame, decrementAlertCount } = useGame()
   const [tab, setTab]                   = useState('listings')
   const [alerts, setAlerts]             = useState([])
   const [listingAlerts, setListingAlerts] = useState([])
@@ -27,7 +27,7 @@ export default function Alerts({ onDismiss }) {
   async function loadAll() {
     setLoading(true)
     const [alertRes, listingRes, staleRes, ebayRes] = await Promise.all([
-      supabase.from('v_active_alerts').select('*').eq('game_id', activeGame.id),
+      supabase.from('v_active_alerts').select('*').eq('game_id', activeGame.id).gte('new_price', 1),
       supabase.from('v_listing_price_alerts').select('*').eq('game_id', activeGame.id),
       supabase.from('v_stale_listings').select('*').eq('game_id', activeGame.id),
       supabase.from('ebay_listings').select('id, card_id, ebay_url').eq('status', 'active').not('card_id', 'is', null),
@@ -41,7 +41,6 @@ export default function Alerts({ onDismiss }) {
 
     const alertsWithLinks = (alertRes.data ?? [])
       .map(a => ({ ...a, ...(ebayByCard[a.card_id] ?? {}) }))
-      .filter(a => (a.new_price ?? 0) >= 1)
 
     setAlerts(alertsWithLinks)
     setListingAlerts(listingRes.data ?? [])
@@ -59,7 +58,18 @@ export default function Alerts({ onDismiss }) {
   async function dismiss(id) {
     await supabase.from('price_alerts').update({ dismissed: true }).eq('id', id)
     setAlerts(prev => prev.filter(a => a.id !== id))
-    if (onDismiss) onDismiss()
+    setCounts(prev => ({ ...prev, price_alerts: Math.max(0, (prev.price_alerts ?? 1) - 1) }))
+    decrementAlertCount()
+  }
+
+  async function dismissAll() {
+    const ids = alerts.map(a => a.id)
+    if (!ids.length) return
+    if (!window.confirm(`Dismiss all ${ids.length} price alerts?`)) return
+    await supabase.from('price_alerts').update({ dismissed: true }).in('id', ids)
+    setAlerts([])
+    setCounts(prev => ({ ...prev, price_alerts: 0 }))
+    decrementAlertCount(ids.length)
   }
 
   const tabStyle = (id) => ({
@@ -92,13 +102,18 @@ export default function Alerts({ onDismiss }) {
       </div>
 
       {/* Tab bar */}
-      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 20 }}>
+      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 20, alignItems: 'center' }}>
         {TABS.map(t => (
           <button key={t.id} style={tabStyle(t.id)} onClick={() => setTab(t.id)}>
             {t.label}
             <Badge count={counts[t.id]} />
           </button>
         ))}
+        {tab === 'price_alerts' && alerts.length > 0 && (
+          <button className="btn btn-ghost btn-sm" style={{ marginLeft: 'auto', fontSize: 12 }} onClick={dismissAll}>
+            Dismiss all
+          </button>
+        )}
       </div>
 
       {/* ── Price alerts tab ── */}

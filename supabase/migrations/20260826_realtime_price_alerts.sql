@@ -1,0 +1,11 @@
+-- Sidebar Price Alerts badge (App.jsx) subscribes to postgres_changes on the
+-- price_alerts table to keep its count live, but price_alerts was never added
+-- to the supabase_realtime publication -- schema.sql shows `CREATE PUBLICATION
+-- supabase_realtime WITH (publish = 'insert, update, delete, truncate')` with
+-- no ADD TABLE for it (contrast with the messages table, which does get one for
+-- its own publication). With no tables in the publication, Postgres never emits
+-- WAL changes to Realtime for this table, so the badge's onChange handler never
+-- fires -- it only ever reflects whatever count was fetched at session start
+-- (or the local optimistic decrement wired into Alerts.jsx's dismiss button),
+-- explaining reports that the count "isn't updating".
+ALTER PUBLICATION supabase_realtime ADD TABLE public.price_alerts;
