@@ -51,6 +51,7 @@ export default function Dashboard() {
   const [pnl, setPnl]             = useState(null)
   const [boxCosts, setBoxCosts]   = useState(null)
   const [unlinked, setUnlinked]   = useState({ ebay: 0, tcgplayer: 0 })
+  const [noStock, setNoStock]     = useState({ ebay: [], tcgplayer: [] })
   const [unlinkedLoading, setUnlinkedLoading] = useState(true)
 
   useEffect(() => {
@@ -81,14 +82,47 @@ export default function Dashboard() {
     supabase.from('boxes').select('purchase_price').then(({ data }) => {
       if (data) setBoxCosts(data.reduce((s, b) => s + (b.purchase_price || 0), 0))
     })
-    // Unlinked = no card_id, no card_name, no lot cards — i.e. sold/listed with nothing
-    // deducted from inventory. Not game-scoped since these rows have no computed game_id.
+    // Two distinct problems, both meaning "this listing has no physical card behind it":
+    //  - unlinked: no card_id, no card_name, no lot cards at all
+    //  - noStock: linked to a real card (directly or via a lot), but that card's quantity_owned is 0
+    // Not game-scoped since unlinked rows have no computed game_id, and a listing can outlive
+    // whichever game happens to be active.
     Promise.all([
-      supabase.from('v_ebay_active').select('card_id, card_name, card_count'),
-      supabase.from('v_tcgplayer_active').select('card_id, card_name, card_count'),
-    ]).then(([ebayRes, tcgRes]) => {
-      const countUnlinked = (rows) => (rows ?? []).filter(l => !l.card_id && !l.card_name && !((l.card_count ?? 0) > 0)).length
-      setUnlinked({ ebay: countUnlinked(ebayRes.data), tcgplayer: countUnlinked(tcgRes.data) })
+      supabase.from('v_ebay_active').select('id, title, card_id, card_name, all_card_names, card_count'),
+      supabase.from('v_tcgplayer_active').select('id, title, card_id, card_name, all_card_names, card_count'),
+      supabase.from('ebay_listing_cards').select('listing_id, card_id'),
+      supabase.from('tcgplayer_listing_cards').select('listing_id, card_id'),
+      supabase.from('cards').select('id, quantity_owned'),
+    ]).then(([ebayRes, tcgRes, ebayLcRes, tcgLcRes, cardsRes]) => {
+      const ownedMap = new Map((cardsRes.data ?? []).map(c => [c.id, c.quantity_owned ?? 0]))
+      const lotCardsByListing = (rows) => {
+        const m = new Map()
+        for (const r of rows ?? []) {
+          if (!m.has(r.listing_id)) m.set(r.listing_id, [])
+          m.get(r.listing_id).push(r.card_id)
+        }
+        return m
+      }
+      const ebayLots = lotCardsByListing(ebayLcRes.data)
+      const tcgLots  = lotCardsByListing(tcgLcRes.data)
+
+      function classify(rows, lots) {
+        let unlinkedCount = 0
+        const outOfStock = []
+        for (const l of (rows ?? [])) {
+          const cardIds = l.card_id ? [l.card_id] : (lots.get(l.id) ?? [])
+          if (cardIds.length === 0) { unlinkedCount++; continue }
+          const owned = cardIds.reduce((s, id) => s + (ownedMap.get(id) ?? 0), 0)
+          if (owned <= 0) outOfStock.push(l)
+        }
+        return { unlinkedCount, outOfStock }
+      }
+
+      const ebayClassified = classify(ebayRes.data, ebayLots)
+      const tcgClassified  = classify(tcgRes.data, tcgLots)
+
+      setUnlinked({ ebay: ebayClassified.unlinkedCount, tcgplayer: tcgClassified.unlinkedCount })
+      setNoStock({ ebay: ebayClassified.outOfStock, tcgplayer: tcgClassified.outOfStock })
       setUnlinkedLoading(false)
     })
   }, [])
@@ -192,23 +226,23 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Unlinked listings warning */}
+      {/* Listings without inventory backing them — either no card link at all, or linked to a card with 0 owned */}
       <div className="panel mb-16">
         <div className="panel-header">
-          <span className="panel-title">Unlinked Listings</span>
+          <span className="panel-title">Listings Without Inventory</span>
         </div>
         <div style={{ padding: '8px 12px' }}>
           {unlinkedLoading ? (
             <div className="loading" style={{ padding: '12px 4px' }}>Checking…</div>
-          ) : unlinked.ebay === 0 && unlinked.tcgplayer === 0 ? (
+          ) : unlinked.ebay === 0 && unlinked.tcgplayer === 0 && noStock.ebay.length === 0 && noStock.tcgplayer.length === 0 ? (
             <div className="empty-state">
               <div className="empty-state-icon">✓</div>
-              Every active listing is tied to a card in inventory
+              Every active listing is backed by owned inventory
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div className="alert-desc" style={{ padding: '4px 4px 0' }}>
-                These active listings aren't tied to any card in inventory — sales won't deduct stock or feed P&L correctly. Link them to a card or end the listing.
+                These active listings aren't backed by owned inventory — sales won't deduct stock correctly. Link them to a card, restock, or end the listing.
               </div>
               {unlinked.ebay > 0 && (
                 <div className="alert-item danger">
@@ -228,6 +262,26 @@ export default function Dashboard() {
                   <Link to="/tcgplayer-listings?unlinked=1" className="btn btn-ghost btn-sm">Review →</Link>
                 </div>
               )}
+              {noStock.ebay.map(l => (
+                <div className="alert-item danger" key={`ebay-${l.id}`}>
+                  <span className="alert-icon">⚠</span>
+                  <div className="alert-content">
+                    <div className="alert-title">{l.card_name || l.all_card_names} — 0 owned</div>
+                    <div className="alert-desc">eBay: {l.title}</div>
+                  </div>
+                  <Link to={`/listings?highlight=${l.id}`} className="btn btn-ghost btn-sm">View →</Link>
+                </div>
+              ))}
+              {noStock.tcgplayer.map(l => (
+                <div className="alert-item danger" key={`tcg-${l.id}`}>
+                  <span className="alert-icon">⚠</span>
+                  <div className="alert-content">
+                    <div className="alert-title">{l.card_name || l.all_card_names} — 0 owned</div>
+                    <div className="alert-desc">TCGPlayer: {l.title}</div>
+                  </div>
+                  <Link to={`/tcgplayer-listings?highlight=${l.id}`} className="btn btn-ghost btn-sm">View →</Link>
+                </div>
+              ))}
             </div>
           )}
         </div>
