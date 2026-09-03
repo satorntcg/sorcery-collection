@@ -50,6 +50,8 @@ export default function Dashboard() {
   const [loading, setLoading]     = useState(true)
   const [pnl, setPnl]             = useState(null)
   const [boxCosts, setBoxCosts]   = useState(null)
+  const [unlinked, setUnlinked]   = useState({ ebay: 0, tcgplayer: 0 })
+  const [unlinkedLoading, setUnlinkedLoading] = useState(true)
 
   useEffect(() => {
     async function load() {
@@ -78,6 +80,16 @@ export default function Dashboard() {
     supabase.from('v_combined_pnl').select('*').single().then(({ data }) => setPnl(data))
     supabase.from('boxes').select('purchase_price').then(({ data }) => {
       if (data) setBoxCosts(data.reduce((s, b) => s + (b.purchase_price || 0), 0))
+    })
+    // Unlinked = no card_id, no card_name, no lot cards — i.e. sold/listed with nothing
+    // deducted from inventory. Not game-scoped since these rows have no computed game_id.
+    Promise.all([
+      supabase.from('v_ebay_active').select('card_id, card_name, card_count'),
+      supabase.from('v_tcgplayer_active').select('card_id, card_name, card_count'),
+    ]).then(([ebayRes, tcgRes]) => {
+      const countUnlinked = (rows) => (rows ?? []).filter(l => !l.card_id && !l.card_name && !((l.card_count ?? 0) > 0)).length
+      setUnlinked({ ebay: countUnlinked(ebayRes.data), tcgplayer: countUnlinked(tcgRes.data) })
+      setUnlinkedLoading(false)
     })
   }, [])
 
@@ -179,6 +191,47 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+
+      {/* Unlinked listings warning */}
+      <div className="panel mb-16">
+        <div className="panel-header">
+          <span className="panel-title">Unlinked Listings</span>
+        </div>
+        <div style={{ padding: '8px 12px' }}>
+          {unlinkedLoading ? (
+            <div className="loading" style={{ padding: '12px 4px' }}>Checking…</div>
+          ) : unlinked.ebay === 0 && unlinked.tcgplayer === 0 ? (
+            <div className="empty-state">
+              <div className="empty-state-icon">✓</div>
+              Every active listing is tied to a card in inventory
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div className="alert-desc" style={{ padding: '4px 4px 0' }}>
+                These active listings aren't tied to any card in inventory — sales won't deduct stock or feed P&L correctly. Link them to a card or end the listing.
+              </div>
+              {unlinked.ebay > 0 && (
+                <div className="alert-item danger">
+                  <span className="alert-icon">⚠</span>
+                  <div className="alert-content">
+                    <div className="alert-title">{unlinked.ebay} eBay listing{unlinked.ebay === 1 ? '' : 's'} with no linked card</div>
+                  </div>
+                  <Link to="/listings?unlinked=1" className="btn btn-ghost btn-sm">Review →</Link>
+                </div>
+              )}
+              {unlinked.tcgplayer > 0 && (
+                <div className="alert-item danger">
+                  <span className="alert-icon">⚠</span>
+                  <div className="alert-content">
+                    <div className="alert-title">{unlinked.tcgplayer} TCGPlayer listing{unlinked.tcgplayer === 1 ? '' : 's'} with no linked card</div>
+                  </div>
+                  <Link to="/tcgplayer-listings?unlinked=1" className="btn btn-ghost btn-sm">Review →</Link>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* Active alerts */}
       <div className="panel mb-16">

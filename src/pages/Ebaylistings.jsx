@@ -1074,6 +1074,14 @@ export default function EbayListings() {
     if (highlightId) setTab(highlightTab === 'sold' ? 'sold' : 'active')
   }, [highlightId, highlightTab])
 
+  // Arriving from the Dashboard's unlinked-listings warning: pre-apply the filter (and tab, if given)
+  useEffect(() => {
+    if (searchParams.get('unlinked') === '1') {
+      setUnlinkedOnly(true)
+      if (searchParams.get('tab') === 'sold') setTab('sold')
+    }
+  }, [searchParams])
+
   // Scroll to highlighted row after data loads and DOM renders
   useEffect(() => {
     if (!highlightId || loading) return
